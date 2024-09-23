@@ -1,2 +1,2 @@
 # os
-Materials for cource OS (NSU FIT)
+Laboratory works on Operating Systems (NSU FIT)
