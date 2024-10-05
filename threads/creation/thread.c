@@ -26,10 +26,12 @@ void *mythread(void *arg) {
 
 	if (pthread_equal(passed_tid, real_tid)) {
 		local = 10;
+		global = 100;
 	}
 
-	sleep(60);
+	// sleep(60);
 	printf("value of local: %i\n", local);
+	printf("value of global: %i\n", global);
 	return NULL;
 }
 
@@ -55,4 +57,3 @@ int main() {
 
 	return 0;
 }
-
