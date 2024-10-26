@@ -24,10 +24,11 @@ void *mythread(void *arg) {
 		   "local const:\t%p\n"
 		   "global:\t\t%p\n", &local, &local_static, &local_const, &global);
 
-	if (pthread_equal(passed_tid, real_tid)) {
-		local = 10;
-		global = 100;
-	}
+	// if (pthread_equal(passed_tid, real_tid)) {
+
+	// }
+	local++;
+	global++;
 
 	// sleep(60);
 	printf("value of local: %i\n", local);
@@ -53,7 +54,7 @@ int main() {
 		return -1;
 	}
 
-	sleep(65);
+	sleep(2);
 
-	return 0;
+	pthread_exit(NULL);
 }

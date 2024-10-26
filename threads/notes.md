@@ -13,10 +13,21 @@ POSIX.1 allows an implementation wide freedom in choosing the type used to repre
 Завершения joinable потока можно дожидаться при помощи pthread_join, чтобы получить возвращаемое им значение и освободить ресурсы. Для detached потоков нельзя делать pthread_join. Их возвращаемое значение нельзя получить. Ресурсы освобождаются автоматически при завершении потока.
 
 **man pthread_create NOTES (что такое joinable и detached потоки):**
-A thread may either be joinable or detached. If a thread is joinable, then another thread can call pthread_join(3) to wait for the thread to terminate and fetch its exit status. Only when a terminated joinable thread has been joined are the last of its resources released back to the system. When a detached thread terminates, its resources are automatically released back to the system: it is not possible to join with the thread in order to obtain its exit status.Making a thread detached is useful for some types of daemon threads whose exit status the application does not need to care about. By default, a new thread is created in a joinable state...
+A thread may either be joinable or detached. If a thread is joinable, then another thread can call pthread_join(3) to wait for the thread to terminate and fetch its exit status. Only when a terminated joinable thread has been joined are the last of its resources released back to the system. When a detached thread terminates, its resources are automatically released back to the system: it is not possible to join with the thread in order to obtain its exit status. Making a thread detached is useful for some types of daemon threads whose exit status the application does not need to care about. By default, a new thread is created in a joinable state...
 
 **man pthread_self NOTES (про переиспользование thread ID):**
 Thread IDs are guaranteed to be unique only within a process. A thread ID may be reused after a terminated thread has been joined, or a detached thread has terminated.
+
+### Вопрос про ограничение на количество потоков
+Какие есть ограничения, как их посмотреть? Что будет, если предел достигнут, и мы создаем поток при помощи pthread_create?
+**man pthread_create ERRORS:**
++ **EAGAIN** Insufficient resources to create another thread.
++ **EAGAIN** A system-imposed limit on the number of threads was encountered. There are a number of limits that may trigger this error: the RLIMIT_NPROC soft resource limit (set via setrlimit(2)), which limits the number of processes and threads for a real user ID, was reached; the kernel's system-wide limit on the number of processes and threads, /proc/sys/kernel/threads-max, was reached (see proc(5)); or the maximum number of PIDs, /proc/sys/kernel/pid_max, was reached (see proc(5)).
+
+Таким образом, если предел достигнут, то функция завершится с ошибкой. Есть следующие ограничения:
++ RLIMIT_NPROC - настраивается через setrlimit(2). Это лимит процессов, которые может запускать данный пользователь (каждый поток тоже рассматривается как процесс).
++ /proc/sys/kernel/threads-max - всесистемный лимит на число потоков.
++ /proc/sys/kernel/pid_max - значение, начиная с которого нумерация pid начинается сначала. Т.е. значение в этом файле на 1 больше, чем максимальный pid. Это так же ограничение на количество потоков во всей системе.
 
 ## ПУНКТ 1.3
 
@@ -90,3 +101,23 @@ POSIX.1 permits pthread_cleanup_push() and pthread_cleanup_pop() to be implement
 + sigprocmask(2), pthread_sigmask(3), sigsetops(3) - про настройку маски сигналов
 + sigwait(3) - про ожидание сигналов
 + pthread_kill(3) - про отправку сигналов POSIX потокам
+
+## ПУНКТ 1.5
+
+Данные о потоке будем хранить в управляющей структуре mythread.
+Создание потока при помощи `mythread_create()` состоит из следующих этапов:
++ Выделение региона памяти под стек;
++ Заполнение полей управляющей структуры;
++ Создание ядерного потока и запуск в нем функции `mythread_startup()`.
+
+С созданием стека все просто: выделяем регион при помощи `mmap()` и устанавливаем права на чтение/запись на весь регион, кроме первой страницы при помощи `mprotect()`. Первая страница региона - это последняя страница стека. Поэтому когда стек будет исчерпан и произойдет обращение к этой странице, мы получим исключение. Если на каком-то этапе произошла ошибка, очищаем память при помощи `munmap()` и возвращаем NULL.
+
+Далее инициализируем управляющую структуру потока. Сама структура будет храниться в последней странице выделенного региона, это устанавливается в `new_thread = (mythread_t) new_stack + STACK_SIZE - PAGE_SIZE;`.
+
+Затем создание потока при помощи `clone()`. В новом потоке будет запускаться функция `mythread_startup()`. Она делает некоторые подготовительные действия и запускает функцию пользователя. В параметре `stack` передается указатель на **начало стека**. Поскольку последняя страница нашего региона занята управляющей структурой, то начало стека смещено вниз, к адресу управляющей структуры. Стек растет вниз от этого адреса, а структура лежит выше этого адреса. Про флаги стоит почитать man clone(2), особенно про CLONE_THREAD.
+
+В `mythread_startup()` сначала сохраняем контекст исполнения, который был перед запуском потоковой функции. Это надо для реализации cancel. Затем запускаем потоковую функцию, и в конце ждем join.
+
+`mythread_join()` ждет, пока потоковая функция не закончит исполняться, после чего помечает поток как joined и возвращает значение. После этого поток как ядерная единица планирования уничтожается. По-хорошему тут еще надо освободить ранее выделенный регион.
+
+В `mythread_join()` просто помечаем поток как canceled, потом `mythread_testcancel()` это проверяет и восстанавливает контекст на точку перед стартом потоковой функции. Там проверяем, что поток canceled и сразу переходим к ожиданию join.

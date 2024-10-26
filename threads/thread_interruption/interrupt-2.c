@@ -10,11 +10,10 @@ void cleanup_routine(void *arg) {
 }
 
 void *thread_routine(void *arg) {
-    char *str;
+    char *str = malloc(sizeof("hello world"));
 
     pthread_cleanup_push(cleanup_routine, (void *) str);
 
-    str = malloc(sizeof("hello world"));
     strcpy(str, "hello world");
     while (1) {
         printf("thread_routine: %s\n", str);
