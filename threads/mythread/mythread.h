@@ -1,11 +1,13 @@
 #ifndef MYTHREAD_H
 #define MYTHREAD_H
 
+#include <stdint.h>
 #include <sys/types.h>
 #include <ucontext.h>
 
 #define PAGE_SIZE       4096
 #define STACK_SIZE      PAGE_SIZE * 3
+#define FUTEX_INIT_VAL  1
 
 typedef void *(*start_routine_t)(void*);
 
@@ -15,6 +17,8 @@ struct mythread {
     void                *arg;
     void                *retval;
     ucontext_t          context_before_start;
+    void                *thread_mem_reg;
+    uint32_t            futex_word;
 
     int                 finished;
     int                 canceled;

@@ -22,8 +22,13 @@ void *thread_func1(void *arg) {
 }
 
 int main(int argc, char **argv) {
+    pid_t self_pid;
     mythread_t t1, t2;
     int err;
+
+    self_pid = getpid();
+    printf("Process id: %i\n", self_pid);
+    sleep(10);
 
     err = mythread_create(&t1, thread_func, (void*) &t1);
     if (err) {
@@ -43,7 +48,8 @@ int main(int argc, char **argv) {
     mythread_join(t2, &t2_retval);
     printf("Return value: %s\n", (char*) t2_retval);
 
-    sleep(7);
+    sleep(5);
     mythread_cancel(t1);
     mythread_join(t1, NULL);
+    sleep(5);
 }

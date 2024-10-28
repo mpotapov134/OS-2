@@ -1,15 +1,43 @@
 #define _GNU_SOURCE
-#include "mythread.h"
+
+#include <errno.h>
+#include <linux/futex.h>
+#include <sched.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/mman.h>
+#include <sys/syscall.h>
 #include <sys/types.h>
-#include <sched.h>
 #include <unistd.h>
 
-enum {
-    MYTHREAD_ERROR = -1
-} typedef errorCode_t;
+#include "mythread.h"
+
+void handle_error(char *msg) {
+    perror(msg);
+    exit(EXIT_FAILURE);
+}
+
+/* futex syscall wrapper */
+static int futex(int *uaddr, int futex_op, int val, const struct timespec *timeout, int *uaddr2, int val3) {
+    return syscall(SYS_futex, uaddr, futex_op, val, timeout, uaddr, val3);
+}
+
+static void fwait(int *futexp) {
+    int s;
+
+    while (1) {
+        /* Is the futex released? */
+        if (atomic_load(futexp) != FUTEX_INIT_VAL)
+            break;
+
+        /* Futex is not released; wait */
+
+        s = futex(futexp, FUTEX_WAIT, 0, NULL, NULL, 0);
+        if (s == -1 && errno != EAGAIN)
+            handle_error("futex-FUTEX_WAIT");
+    }
+}
 
 static void *create_stack() {
     void *stack;
@@ -35,13 +63,17 @@ int mythread_create(mythread_t *thread, start_routine_t start_routine, void *arg
     void *new_stack, *thread_stack;
 
     new_stack = create_stack();
-    if (new_stack == NULL) return MYTHREAD_ERROR;
+    if (new_stack == NULL) return -1;
 
     new_thread = (mythread_t) (new_stack + STACK_SIZE - PAGE_SIZE);
     new_thread->id = thread_id++;
     new_thread->start_routine = start_routine;
     new_thread->arg = arg;
     new_thread->retval = NULL;
+
+    new_thread->thread_mem_reg = new_stack;
+    new_thread->futex_word = FUTEX_INIT_VAL;
+
     new_thread->finished = 0;
     new_thread->canceled = 0;
     new_thread->joined = 0;
@@ -49,10 +81,11 @@ int mythread_create(mythread_t *thread, start_routine_t start_routine, void *arg
     thread_stack = (void *) new_thread;
 
     child_pid = clone(mythread_startup, thread_stack, CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|
-        CLONE_THREAD|CLONE_SYSVSEM, (void *) new_thread);
+        CLONE_THREAD|CLONE_SYSVSEM|CLONE_CHILD_CLEARTID,
+        (void *) new_thread, NULL, NULL, &new_thread->futex_word);
     if (child_pid == -1) {
         munmap(new_stack, STACK_SIZE);
-        return MYTHREAD_ERROR;
+        return -1;
     }
 
     *thread = new_thread;
@@ -91,6 +124,9 @@ void mythread_join(mythread_t thread, void **retval) {
     }
 
     thread->joined = 1;
+
+    fwait(&thread->futex_word);
+    munmap(thread->thread_mem_reg, STACK_SIZE);
 }
 
 void mythread_cancel(mythread_t thread) {
