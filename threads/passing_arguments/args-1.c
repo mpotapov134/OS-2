@@ -9,25 +9,43 @@ struct {
     char *str;
 } typedef arg_t;
 
-void *thread_routine(void *_arg) {
-    arg_t *arg = (arg_t *) _arg;
-    printf("thread_routine: %i %s\n", arg->num, arg->str);
+void *thread1_routine(void *arg);
+void *thread2_routine(void *arg);
+
+void *thread1_routine(void *arg) {
+    arg_t arg_struct = {.num = 10, .str = "hello"};
+    pthread_t thread2;
+    pthread_attr_t thread2_attr;
+
+    pthread_attr_init(&thread2_attr);
+    pthread_attr_setdetachstate(&thread2_attr, PTHREAD_CREATE_DETACHED);
+
+    if (pthread_create(&thread2, &thread2_attr, thread2_routine, (void *) &arg_struct) != 0) {
+        printf("pthread_create failed\n");
+        exit(EXIT_FAILURE);
+    }
+    printf("Thread 1 created thread 2\n");
+
+    return NULL;
+}
+
+void *thread2_routine(void *arg) {
+    printf("Thread 2 started\n");
+    sleep(5);
+    arg_t *arg_struct = (arg_t *) arg;
+    printf("Struct print: %i %s\n", arg_struct->num, arg_struct->str);
     return NULL;
 }
 
 int main(int argc, char **argv) {
-    arg_t arg = {.num = 10, .str = "hello"};
-    pthread_t new_thread;
-    pthread_attr_t attr;
-    pthread_attr_init(&attr);
-    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    pthread_t thread1;
 
-    if (pthread_create(&new_thread, &attr, thread_routine, (void *) &arg) != 0) {
+    if (pthread_create(&thread1, NULL, thread1_routine, NULL) != 0) {
         printf("pthread_create failed\n");
         exit(EXIT_FAILURE);
     }
 
-    pthread_attr_destroy(&attr);
+    // pthread_exit(NULL);
 
-    sleep(3);
+    sleep(10);
 }
