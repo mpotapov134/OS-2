@@ -53,10 +53,10 @@ void *thread_routine_3(void *arg) {
     sigaddset(&sigset, SIGQUIT);
 
     while (1) {
-        printf("thread 3 with tid %i\n", gettid());
-        sleep(1);
-        // sigwait(&sigset, &sig);
-        // printf("SIGQUIT captured synchronously in thread 3 with tid %i\n", gettid());
+        // printf("thread 3 with tid %i\n", gettid());
+        // sleep(1);
+        sigwait(&sigset, &sig);
+        printf("SIGQUIT captured synchronously in thread 3 with tid %i\n", gettid());
     }
 }
 
@@ -77,7 +77,7 @@ int main(int argc, char **argv) {
     pthread_create(&thread2, NULL, thread_routine_2, NULL);
     pthread_create(&thread3, NULL, thread_routine_3, NULL);
 
-    /* block SIGQUIT */
+    /* block SIGQUIT in main thread */
     sigemptyset(&sigset);
     sigaddset(&sigset, SIGQUIT);
     pthread_sigmask(SIG_BLOCK, &sigset, NULL);
