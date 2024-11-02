@@ -12,6 +12,8 @@ struct {
 void *thread1_routine(void *arg) {
     printf("Thread 1 started\n");
     sleep(20);
+    pid_t pid = getpid();
+    printf("%i\n", pid);
     arg_t *arg_struct = (arg_t *) arg;
     printf("Struct print: %i %s\n", arg_struct->num, arg_struct->str);
     return NULL;

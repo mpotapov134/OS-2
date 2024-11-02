@@ -1,5 +1,9 @@
 {
     "files.associations": {
-        "signal.h": "c"
+        "signal.h": "c",
+        "futex.h": "c",
+        "types.h": "c",
+        "stdatomic.h": "c",
+        "sched.h": "c"
     }
 }
