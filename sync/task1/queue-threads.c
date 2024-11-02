@@ -15,6 +15,9 @@
 #define RED "\033[41m"
 #define NOCOLOR "\033[0m"
 
+#define READER_CPU_BIND 1
+#define WRITER_CPU_BIND 1
+
 void set_cpu(int n) {
 	int err;
 	cpu_set_t cpuset;
@@ -37,16 +40,19 @@ void *reader(void *arg) {
 	queue_t *q = (queue_t *)arg;
 	printf("reader [%d %d %d]\n", getpid(), getppid(), gettid());
 
-	set_cpu(1);
+	set_cpu(READER_CPU_BIND);
 
 	while (1) {
 		int val = -1;
 		int ok = queue_get(q, &val);
-		if (!ok)
+		if (!ok) {
 			continue;
+		}
 
-		if (expected != val)
+		if (expected != val) {
 			printf(RED"ERROR: get value is %d but expected - %d" NOCOLOR "\n", val, expected);
+			// queue_print_stats(q);
+		}
 
 		expected = val + 1;
 	}
@@ -59,12 +65,13 @@ void *writer(void *arg) {
 	queue_t *q = (queue_t *)arg;
 	printf("writer [%d %d %d]\n", getpid(), getppid(), gettid());
 
-	set_cpu(1);
+	set_cpu(WRITER_CPU_BIND);
 
 	while (1) {
 		int ok = queue_add(q, i);
-		if (!ok)
+		if (!ok) {
 			continue;
+		}
 		i++;
 	}
 
@@ -86,7 +93,7 @@ int main() {
 		return -1;
 	}
 
-	sched_yield();
+	// sched_yield();
 
 	err = pthread_create(&tid, NULL, writer, q);
 	if (err) {
