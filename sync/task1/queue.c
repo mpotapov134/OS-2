@@ -45,6 +45,13 @@ queue_t* queue_init(int max_count) {
 
 void queue_destroy(queue_t *q) {
 	int tmp;
+
+	if (!q) {
+		return;
+	}
+
+	pthread_cancel(q->qmonitor_tid);
+    pthread_join(q->qmonitor_tid, NULL);
 	while (q->count > 0) {
 		queue_get(q, &tmp);
 	}

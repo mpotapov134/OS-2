@@ -25,4 +25,4 @@ ${TARGET_3}: queue.h ${SRCS_3}
 	${CC} ${CFLAGS} -I${INCLUDE_DIR} ${SRCS_3} ${LIBS} -o ${TARGET_3}
 
 clean:
-	${RM} -f *.o ${TARGET_1} ${TARGET_2}
+	${RM} -f *.o ${TARGET_1} ${TARGET_2} ${TARGET_3}
