@@ -12,6 +12,12 @@
 #include <unistd.h>
 
 #include "mythread.h"
+#include "queue.h"
+
+#define YELLOW              "\e[0;33m"
+#define NO_COLOR            "\e[0m"
+
+static queue_t *finished_queue;
 
 void handle_error(char *msg) {
     perror(msg);
@@ -25,17 +31,9 @@ static int futex(int *uaddr, int futex_op, int val, const struct timespec *timeo
 
 static void fwait(int *futexp) {
     int s;
-
-    while (1) {
-        /* Is the futex released? */
-        if (atomic_load(futexp) != FUTEX_INIT_VAL)
-            break;
-
-        /* Futex is not released; wait */
-
-        s = futex(futexp, FUTEX_WAIT, 0, NULL, NULL, 0);
-        if (s == -1 && errno != EAGAIN)
-            handle_error("futex-FUTEX_WAIT");
+    s = futex(futexp, FUTEX_WAIT, FUTEX_INIT_VAL, NULL, NULL, 0);
+    if (s == -1 && errno != EAGAIN) {
+        handle_error("futex-FUTEX_WAIT");
     }
 }
 
@@ -56,24 +54,42 @@ static void *create_stack() {
     return stack;
 }
 
-int mythread_create(mythread_t *thread, start_routine_t start_routine, void *arg) {
+void mythread_init() {
+    finished_queue = queue_create();
+    if (!finished_queue) {
+        printf("mythread_init failed\n");
+        abort();
+    }
+}
+
+int mythread_create(mythread_t *thread, int is_detached, start_routine_t start_routine, void *arg) {
     static unsigned int thread_id = 0;
-    mythread_t new_thread;
+    mythread_t finished_thread, new_thread;
     pid_t child_pid;
-    void *new_stack, *thread_stack;
+    void *new_reg, *thread_stack;
+    int err;
 
-    new_stack = create_stack();
-    if (new_stack == NULL) return -1;
+    err = queue_get(finished_queue, &finished_thread);
+    if (err) {
+        /* no stacks available, allocate a new one */
+        new_reg = create_stack();
+        if (new_reg == NULL) return -1;
+    } else {
+        /* wait for the thread to finish and reuse its stack */
+        fwait(&finished_thread->futex_word);
+        new_reg = finished_thread->thread_mem_reg;
+    }
 
-    new_thread = (mythread_t) (new_stack + STACK_SIZE - PAGE_SIZE);
+    new_thread = (mythread_t) (new_reg + STACK_SIZE - PAGE_SIZE);
     new_thread->id = thread_id++;
     new_thread->start_routine = start_routine;
     new_thread->arg = arg;
     new_thread->retval = NULL;
 
-    new_thread->thread_mem_reg = new_stack;
+    new_thread->thread_mem_reg = new_reg;
     new_thread->futex_word = FUTEX_INIT_VAL;
 
+    new_thread->detached = is_detached;
     new_thread->finished = 0;
     new_thread->canceled = 0;
     new_thread->joined = 0;
@@ -84,7 +100,7 @@ int mythread_create(mythread_t *thread, start_routine_t start_routine, void *arg
         CLONE_THREAD|CLONE_SYSVSEM|CLONE_CHILD_CLEARTID,
         (void *) new_thread, NULL, NULL, &new_thread->futex_word);
     if (child_pid == -1) {
-        munmap(new_stack, STACK_SIZE);
+        munmap(new_reg, STACK_SIZE);
         return -1;
     }
 
@@ -97,27 +113,40 @@ int mythread_startup(void *arg) {
     getcontext(&thread->context_before_start);
 
     if (!thread->canceled) {
-        printf("\nThread %i started\n\n", thread->id);
+        printf(YELLOW "Thread %i started\n" NO_COLOR, thread->id);
         thread->retval = thread->start_routine(thread->arg);
     }
 
     thread->finished = 1;
 
-    while (!thread->joined) {
+    while (!thread->joined && !thread->detached) {
         sleep(1);
     }
 
-    printf("\nThread %i finished\n\n", thread->id);
+    printf(YELLOW "Thread %i finished\n" NO_COLOR, thread->id);
+
+    queue_put(finished_queue, thread);
 
     return 0;
 }
 
+void mythread_detach(mythread_t thread) {
+    thread->detached = 1;
+}
+
 void mythread_join(mythread_t thread, void **retval) {
+    if (thread->detached) {
+        if (retval != NULL) {
+            *retval = thread->retval;
+        }
+        return;
+    }
+
     while (!thread->finished) {
         sleep(1);
     }
 
-    printf("\nThread %i joined\n\n", thread->id);
+    printf(YELLOW "Thread %i joined\n" NO_COLOR, thread->id);
 
     if (retval != NULL) {
         *retval = thread->retval;
@@ -125,14 +154,14 @@ void mythread_join(mythread_t thread, void **retval) {
 
     thread->joined = 1;
 
-    fwait(&thread->futex_word);
-    munmap(thread->thread_mem_reg, STACK_SIZE);
+    // fwait(&thread->futex_word);
+    // munmap(thread->thread_mem_reg, STACK_SIZE);
 }
 
 void mythread_cancel(mythread_t thread) {
     thread->retval = NULL;
     thread->canceled = 1;
-    printf("\nThread %i canceled\n\n", thread->id);
+    printf(YELLOW "Thread %i canceled\n" NO_COLOR, thread->id);
 }
 
 void mythread_testcancel(mythread_t thread) {

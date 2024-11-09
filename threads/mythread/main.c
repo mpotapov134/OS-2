@@ -26,11 +26,13 @@ int main(int argc, char **argv) {
     mythread_t t1, t2;
     int err;
 
+    mythread_init();
+
     self_pid = getpid();
     printf("Process id: %i\n", self_pid);
     sleep(10);
 
-    err = mythread_create(&t1, thread_func, (void*) &t1);
+    err = mythread_create(&t1, 0, thread_func, (void*) &t1);
     if (err) {
         printf("mythread_create failed\n");
         exit(EXIT_FAILURE);
@@ -38,7 +40,7 @@ int main(int argc, char **argv) {
 
     sleep(1);
 
-    err = mythread_create(&t2, thread_func1, (void*) &t2);
+    err = mythread_create(&t2, 0, thread_func1, (void*) &t2);
     if (err) {
         printf("mythread_create failed\n");
         exit(EXIT_FAILURE);

@@ -20,6 +20,7 @@ struct mythread {
     void                *thread_mem_reg;
     uint32_t            futex_word;
 
+    int                 detached;
     int                 finished;
     int                 canceled;
     int                 joined;
@@ -27,8 +28,10 @@ struct mythread {
 
 typedef struct mythread *mythread_t;
 
-int mythread_create(mythread_t *thread, start_routine_t start_routine, void *arg);
+void mythread_init();
+int mythread_create(mythread_t *thread, int is_detached, start_routine_t start_routine, void *arg);
 int mythread_startup(void *arg);
+void mythread_detach(mythread_t thread);
 void mythread_join(mythread_t thread, void **retval);
 void mythread_cancel(mythread_t thread);
 void mythread_testcancel(mythread_t thread);
