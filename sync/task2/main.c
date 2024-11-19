@@ -10,7 +10,8 @@
 #include <pthread.h>
 #include <sched.h>
 
-#include "queue.h"
+// #include "queue-spin.h"
+#include "queue-mutex.h"
 
 #define RED "\033[41m"
 #define NOCOLOR "\033[0m"
@@ -67,7 +68,7 @@ void *writer(void *arg) {
 	set_cpu(WRITER_CPU_BIND);
 
 	while (1) {
-		usleep(1);
+		// usleep(1);
 		int ok = queue_add(q, i);
 		if (!ok) {
 			continue;

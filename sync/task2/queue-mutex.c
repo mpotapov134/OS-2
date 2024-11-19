@@ -1,7 +1,7 @@
 #define _GNU_SOURCE
 #include <assert.h>
 
-#include "queue-spin.h"
+#include "queue-mutex.h"
 
 void *qmonitor(void *arg) {
 	queue_t *q = (queue_t *)arg;
@@ -39,9 +39,9 @@ queue_t* queue_init(int max_count) {
 		abort();
 	}
 
-	err = pthread_spin_init(&q->lock, PTHREAD_PROCESS_PRIVATE);
+	err = pthread_mutex_init(&q->mutex, NULL);
 	if (err) {
-		printf("queue_init: pthread_spin_init() failed: %s\n", strerror(err));
+		printf("queue_init: pthread_mutex_init() failed: %s\n", strerror(err));
 		abort();
 	}
 
@@ -60,19 +60,19 @@ void queue_destroy(queue_t *q) {
 	while (q->count > 0) {
 		queue_get(q, &tmp);
 	}
-	pthread_spin_destroy(&q->lock);
+	pthread_mutex_destroy(&q->mutex);
 	free(q);
 }
 
 int queue_add(queue_t *q, int val) {
-	pthread_spin_lock(&q->lock);
+	pthread_mutex_lock(&q->mutex);
 
 	q->add_attempts++;
 
 	assert(q->count <= q->max_count);
 
 	if (q->count == q->max_count) {
-		pthread_spin_unlock(&q->lock);
+		pthread_mutex_unlock(&q->mutex);
 		return 0;
 	}
 
@@ -95,20 +95,20 @@ int queue_add(queue_t *q, int val) {
 	q->count++;
 	q->add_count++;
 
-	pthread_spin_unlock(&q->lock);
+	pthread_mutex_unlock(&q->mutex);
 
 	return 1;
 }
 
 int queue_get(queue_t *q, int *val) {
-	pthread_spin_lock(&q->lock);
+	pthread_mutex_lock(&q->mutex);
 
 	q->get_attempts++;
 
 	assert(q->count >= 0);
 
 	if (q->count == 0) {
-		pthread_spin_unlock(&q->lock);
+		pthread_mutex_unlock(&q->mutex);
 		return 0;
 	}
 
@@ -121,16 +121,16 @@ int queue_get(queue_t *q, int *val) {
 	q->count--;
 	q->get_count++;
 
-	pthread_spin_unlock(&q->lock);
+	pthread_mutex_unlock(&q->mutex);
 
 	return 1;
 }
 
 void queue_print_stats(queue_t *q) {
-	pthread_spin_lock(&q->lock);
+	pthread_mutex_lock(&q->mutex);
 	printf("queue stats: current size %d; attempts: (%ld %ld %ld); counts (%ld %ld %ld)\n",
 		q->count,
 		q->add_attempts, q->get_attempts, q->add_attempts - q->get_attempts,
 		q->add_count, q->get_count, q->add_count - q->get_count);
-	pthread_spin_unlock(&q->lock);
+	pthread_mutex_unlock(&q->mutex);
 }
