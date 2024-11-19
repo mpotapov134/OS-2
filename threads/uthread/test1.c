@@ -17,10 +17,9 @@ int main(int argc, char **argv) {
     uthread_t thread1;
     uthread_t thread2;
     uthread_t thread3;
-    struct uthread main_thread = {.name = "main thread"};
+    struct uthread main_thread = {.name = "main thread", .finished = 0};
 
     uthreads[0] = &main_thread;
-    thread_count = 1;
 
     uthread_create(&thread1, "uthread-1", thread_routine, (void *) "Hello");
     uthread_create(&thread2, "uthread-2", thread_routine, (void *) "world");

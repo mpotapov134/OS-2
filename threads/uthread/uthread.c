@@ -7,8 +7,6 @@
 #include "uthread.h"
 
 uthread_t uthreads[MAX_NUM_THREADS];
-int thread_count = 0;
-int cur_thread_ind = 0;
 
 static void uthread_startup(int thread_ind);
 
@@ -35,9 +33,18 @@ int uthread_create(uthread_t *thread, char *name, void (*thread_func)(void *), v
     uthread_t new_thread;
     void *stack;
     int err;
+    int thread_slot = -1;
 
-    if (thread_count >= MAX_NUM_THREADS) {
-        printf("Reached number of threads limit\n");
+    /* Search for a viable slot */
+    for (int i = 0; i < MAX_NUM_THREADS; i++) {
+        if (uthreads[i] == NULL || uthreads[i]->finished) {
+            thread_slot = i;
+            break;
+        }
+    }
+
+    if (thread_slot == -1) {
+        printf("\e[31m" "Reached number of threads limit\n" "\e[0m");
         return -1;
     }
 
@@ -48,7 +55,6 @@ int uthread_create(uthread_t *thread, char *name, void (*thread_func)(void *), v
     }
 
     new_thread = (uthread_t) (stack + STACK_SIZE - PAGE_SIZE);
-    uthreads[thread_count++] = new_thread;
 
     err = getcontext(&new_thread->context);
     if (err) {
@@ -60,33 +66,51 @@ int uthread_create(uthread_t *thread, char *name, void (*thread_func)(void *), v
     new_thread->context.uc_stack.ss_sp = stack;
     new_thread->context.uc_stack.ss_flags = 0;
     new_thread->context.uc_stack.ss_size = STACK_SIZE - PAGE_SIZE;
-    makecontext(&new_thread->context, (void (*)()) uthread_startup, 1, thread_count - 1);
+    makecontext(&new_thread->context, (void (*)()) uthread_startup, 1, thread_slot);
 
     new_thread->thread_func = thread_func;
     new_thread->arg = arg;
     strncpy(new_thread->name, name, THREAD_NAME_LEN);
+    new_thread->finished = 0;
+
+    uthreads[thread_slot] = new_thread;
 
     *thread = new_thread;
     return 0;
 }
 
 
-void uthread_startup(int thread_ind) {
-    uthread_t thread = uthreads[thread_ind];
+void uthread_startup(int thread_slot) {
+    uthread_t thread = uthreads[thread_slot];
     thread->thread_func(thread->arg);
+
+    thread->finished = 1;
+    printf("\e[0;34m" "Thread [%s] finished\n" "\e[0m", thread->name);
+    uthread_schedule();
 }
 
 
 void uthread_schedule() {
+    static int cur_thread_ind = 0;
+
     int err;
+    int next_thread_ind;
     ucontext_t *cur_context, *next_context;
 
-    cur_context = &uthreads[cur_thread_ind]->context;
-    cur_thread_ind = (cur_thread_ind + 1) % thread_count;
-    next_context = &uthreads[cur_thread_ind]->context;
+    /* Search for the next runnable thread */
+    for (int i = 1; i <= MAX_NUM_THREADS; i++) {
+        next_thread_ind = (cur_thread_ind + i) % MAX_NUM_THREADS;
+        if (uthreads[next_thread_ind] != NULL && !uthreads[next_thread_ind]->finished) {
+            break;
+        }
+    }
 
-    printf("%sScheduled thread [%i] with name [%s]\n%s",
-        "\e[0;33m", cur_thread_ind, uthreads[cur_thread_ind]->name, "\e[0m");
+    cur_context = &uthreads[cur_thread_ind]->context;
+    next_context = &uthreads[next_thread_ind]->context;
+    cur_thread_ind = next_thread_ind;
+
+    printf("\e[0;33m" "Scheduled thread [%i] with name [%s]\n" "\e[0m",
+        cur_thread_ind, uthreads[cur_thread_ind]->name);
 
     err = swapcontext(cur_context, next_context);
     if (err) {

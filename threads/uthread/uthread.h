@@ -13,12 +13,13 @@ struct uthread {
     void                (*thread_func)(void *);
     void                *arg;
     ucontext_t          context;
+
+    int                 finished;
 };
 
 typedef struct uthread *uthread_t;
 
 extern uthread_t uthreads[MAX_NUM_THREADS];
-extern int thread_count;
 
 int uthread_create(uthread_t *thread, char *name, void (*thread_func)(void *), void *arg);
 void uthread_schedule();
