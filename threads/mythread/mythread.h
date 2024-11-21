@@ -6,10 +6,15 @@
 #include <ucontext.h>
 
 #define PAGE_SIZE       4096
-#define STACK_SIZE      PAGE_SIZE * 3
+#define STACK_SIZE      PAGE_SIZE * 10
 #define FUTEX_INIT_VAL  1
 
 typedef void *(*start_routine_t)(void*);
+
+enum {
+    CANCEL_DEFERRED,
+    CANCEL_ASYNC
+} typedef cancelType_t;
 
 struct mythread {
     unsigned int        id;
@@ -19,6 +24,9 @@ struct mythread {
     ucontext_t          context_before_start;
     void                *thread_mem_reg;
     uint32_t            futex_word;
+    pid_t               tid;
+
+    cancelType_t        cancel_type;
 
     int                 detached;
     int                 finished;
@@ -35,5 +43,6 @@ void mythread_detach(mythread_t thread);
 void mythread_join(mythread_t thread, void **retval);
 void mythread_cancel(mythread_t thread);
 void mythread_testcancel(mythread_t thread);
+void mythread_set_cancel_type(mythread_t thread, cancelType_t new_type);
 
 #endif
