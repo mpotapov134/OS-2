@@ -1,11 +1,11 @@
-TARGET_1 = spin
-SRCS_1 = queue-spin.c main.c
+TARGET_SPIN = spin.out
+SRCS_SPIN = queue-spin.c main.c
 
-TARGET_2 = mutex
-SRCS_2 = queue-mutex.c main.c
+TARGET_MUTEX = mutex.out
+SRCS_MUTEX = queue-mutex.c main.c
 
-# TARGET_3 = queue-threads-1
-# SRCS_3 = queue.c queue-threads-1.c
+TARGET_COND = cond.out
+SRCS_COND = queue-cond.c main.c
 
 CC=gcc
 RM=rm
@@ -13,16 +13,16 @@ CFLAGS= -g -Wall
 LIBS=-lpthread
 INCLUDE_DIR="."
 
-all: ${TARGET_1} ${TARGET_2}
+all: ${TARGET_SPIN} ${TARGET_MUTEX} ${TARGET_COND}
 
-${TARGET_1}: queue-spin.h ${SRCS_1}
-	${CC} ${CFLAGS} -I${INCLUDE_DIR} ${SRCS_1} ${LIBS} -o ${TARGET_1}
+${TARGET_SPIN}: queue-spin.h ${SRCS_SPIN}
+	${CC} ${CFLAGS} -I${INCLUDE_DIR} ${SRCS_SPIN} ${LIBS} -o ${TARGET_SPIN}
 
-${TARGET_2}: queue-mutex.h ${SRCS_2}
-	${CC} ${CFLAGS} -I${INCLUDE_DIR} ${SRCS_2} ${LIBS} -o ${TARGET_2}
+${TARGET_MUTEX}: queue-mutex.h ${SRCS_MUTEX}
+	${CC} ${CFLAGS} -I${INCLUDE_DIR} ${SRCS_MUTEX} ${LIBS} -o ${TARGET_MUTEX}
 
-# ${TARGET_3}: queue.h ${SRCS_3}
-# 	${CC} ${CFLAGS} -I${INCLUDE_DIR} ${SRCS_3} ${LIBS} -o ${TARGET_3}
+${TARGET_COND}: queue-cond.h ${SRCS_COND}
+	${CC} ${CFLAGS} -I${INCLUDE_DIR} ${SRCS_COND} ${LIBS} -o ${TARGET_COND}
 
 clean:
-	${RM} -f *.o ${TARGET_1} ${TARGET_2}
+	${RM} -f *.o ${TARGET_SPIN} ${TARGET_MUTEX} ${TARGET_COND}
