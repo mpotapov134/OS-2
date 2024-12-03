@@ -1,10 +1,10 @@
-TARGET1 = test-main
+TARGET1 = test-main.out
 SRCS1 = mythread.c queue.c map.c main.c
 
-TARGET2 = test-detached
+TARGET2 = test-detached.out
 SRCS2 = mythread.c queue.c map.c test-detached.c
 
-TARGET3 = test-async
+TARGET3 = test-async.out
 SRCS3 = mythread.c queue.c map.c test-async.c
 
 CC=gcc

@@ -160,13 +160,17 @@ int mythread_startup(void *arg) {
     thread->finished = 1;
     mapRemove(thread_map, gettid());
 
-    while (!thread->joined && !thread->detached) {
+    if (thread->detached) {
+        printf(YELLOW "Thread %i finished\n" NO_COLOR, thread->id);
+        queue_put(finished_queue, thread);
+        return 0;
+    }
+
+    while (!thread->joined) {
         sleep(1);
     }
 
     printf(YELLOW "Thread %i finished\n" NO_COLOR, thread->id);
-
-    queue_put(finished_queue, thread);
 
     return 0;
 }
@@ -192,8 +196,10 @@ void mythread_join(mythread_t thread, void **retval) {
     if (retval != NULL) {
         *retval = thread->retval;
     }
-
     thread->joined = 1;
+
+    fwait(&thread->futex_word);
+    munmap(thread->thread_mem_reg, STACK_SIZE);
 }
 
 void mythread_cancel(mythread_t thread) {
