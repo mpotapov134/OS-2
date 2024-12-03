@@ -4,8 +4,8 @@ SRCS_1 = main-mutex.c list-mutex.c
 TARGET_2 = spin.out
 SRCS_2 = main-spin.c list-spin.c
 
-# TARGET_3 = queue-threads-1
-# SRCS_3 = queue.c queue-threads-1.c
+TARGET_3 = rw.out
+SRCS_3 = main-rw.c list-rw.c
 
 CC=gcc
 RM=rm
@@ -13,7 +13,7 @@ CFLAGS= -g -Wall
 LIBS=-lpthread
 INCLUDE_DIR="."
 
-all: ${TARGET_1} ${TARGET_2}
+all: ${TARGET_1} ${TARGET_2} ${TARGET_3}
 
 ${TARGET_1}: list-mutex.h ${SRCS_1}
 	${CC} ${CFLAGS} -I${INCLUDE_DIR} ${SRCS_1} ${LIBS} -o ${TARGET_1}
@@ -21,8 +21,8 @@ ${TARGET_1}: list-mutex.h ${SRCS_1}
 ${TARGET_2}: list-spin.h ${SRCS_2}
 	${CC} ${CFLAGS} -I${INCLUDE_DIR} ${SRCS_2} ${LIBS} -o ${TARGET_2}
 
-# ${TARGET_3}: queue.h ${SRCS_3}
-# 	${CC} ${CFLAGS} -I${INCLUDE_DIR} ${SRCS_3} ${LIBS} -o ${TARGET_3}
+${TARGET_3}: list-rw.h ${SRCS_3}
+	${CC} ${CFLAGS} -I${INCLUDE_DIR} ${SRCS_3} ${LIBS} -o ${TARGET_3}
 
 clean:
-	${RM} -f *.o ${TARGET_1} ${TARGET_2}
+	${RM} -f *.o ${TARGET_1} ${TARGET_2} ${TARGET_3}
