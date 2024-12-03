@@ -7,9 +7,8 @@
 
 #include "list-mutex.h"
 
-#define LOCK_STORAGE_MUTEX
 // #define SLEEP
-#define SWAP_PROB_MODIFIER          100
+#define SWAP_PROB_MODIFIER          1000
 
 int iterIncrease, iterDecrease, iterEqual;
 int countInc, countDec, countEq;
@@ -47,39 +46,42 @@ void *monitor(void *arg) {
 
 void *searchIncreasing(void *arg) {
     Storage *storage = (Storage*) arg;
-    Node *current;
-    int countIncCur;
+    Node *current = storage->first;
+    int countIncCur = 0;
 
     while (1) {
-        current = storage->first;
-        countIncCur = 0;
-
-        #ifdef SLEEP
-        usleep(500);
-        #endif
-
-        #ifdef LOCK_STORAGE_MUTEX
-        mLock(&storage->lock);
-        #endif
-
-        /* Без синхронизации всего списка здесь возникает проблема */
-        while (current != NULL && current->next != NULL) {
-            mLock(&current->lock);
-            mLock(&current->next->lock);
-            if (strlen(current->value) < strlen(current->next->value)) {
-                countIncCur++;
-            }
-            mUnlock(&current->next->lock);
-            mUnlock(&current->lock);
-            current = current->next;
+        if (current == NULL) {
+            current = storage->first;
         }
 
-        iterIncrease++;
-        countInc = countIncCur;
+        mLock(&current->lock);
 
-        #ifdef LOCK_STORAGE_MUTEX
-        mUnlock(&storage->lock);
-        #endif
+        /* reached end of list */
+        if (current->next == NULL) {
+            iterIncrease++;
+            countInc = countIncCur;
+            countIncCur = 0;
+            mUnlock(&current->lock);
+
+            #ifdef SLEEP
+            usleep(500);
+            #endif
+
+            current = storage->first;
+            continue;
+        }
+
+        /* have not reached end of list yet */
+        mLock(&current->next->lock);
+
+        if (strlen(current->value) < strlen(current->next->value)) {
+            countIncCur++;
+        }
+
+        mUnlock(&current->next->lock);
+        mUnlock(&current->lock);
+
+        current = current->next;
     }
 
     return NULL;
@@ -87,38 +89,42 @@ void *searchIncreasing(void *arg) {
 
 void *searchDecreasing(void *arg) {
     Storage *storage = (Storage*) arg;
-    Node *current;
-    int countDecCur;
+    Node *current = storage->first;
+    int countDecCur = 0;
 
     while (1) {
-        current = storage->first;
-        countDecCur = 0;
-
-        #ifdef SLEEP
-        usleep(500);
-        #endif
-
-        #ifdef LOCK_STORAGE_MUTEX
-        mLock(&storage->lock);
-        #endif
-
-        while (current != NULL && current->next != NULL) {
-            mLock(&current->lock);
-            mLock(&current->next->lock);
-            if (strlen(current->value) > strlen(current->next->value)) {
-                countDecCur++;
-            }
-            mUnlock(&current->next->lock);
-            mUnlock(&current->lock);
-            current = current->next;
+        if (current == NULL) {
+            current = storage->first;
         }
 
-        iterDecrease++;
-        countDec = countDecCur;
+        mLock(&current->lock);
 
-        #ifdef LOCK_STORAGE_MUTEX
-        mUnlock(&storage->lock);
-        #endif
+        /* reached end of list */
+        if (current->next == NULL) {
+            iterDecrease++;
+            countDec = countDecCur;
+            countDecCur = 0;
+            mUnlock(&current->lock);
+
+            #ifdef SLEEP
+            usleep(500);
+            #endif
+
+            current = storage->first;
+            continue;
+        }
+
+        /* have not reached end of list yet */
+        mLock(&current->next->lock);
+
+        if (strlen(current->value) > strlen(current->next->value)) {
+            countDecCur++;
+        }
+
+        mUnlock(&current->next->lock);
+        mUnlock(&current->lock);
+
+        current = current->next;
     }
 
     return NULL;
@@ -126,38 +132,42 @@ void *searchDecreasing(void *arg) {
 
 void *searchEqual(void *arg) {
     Storage *storage = (Storage*) arg;
-    Node *current;
-    int countEqCur;
+    Node *current = storage->first;
+    int countEqCur = 0;
 
     while (1) {
-        current = storage->first;
-        countEqCur = 0;
-
-        #ifdef SLEEP
-        usleep(500);
-        #endif
-
-        #ifdef LOCK_STORAGE_MUTEX
-        mLock(&storage->lock);
-        #endif
-
-        while (current != NULL && current->next != NULL) {
-            mLock(&current->lock);
-            mLock(&current->next->lock);
-            if (strlen(current->value) == strlen(current->next->value)) {
-                countEqCur++;
-            }
-            mUnlock(&current->next->lock);
-            mUnlock(&current->lock);
-            current = current->next;
+        if (current == NULL) {
+            current = storage->first;
         }
 
-        iterEqual++;
-        countEq = countEqCur;
+        mLock(&current->lock);
 
-        #ifdef LOCK_STORAGE_MUTEX
-        mUnlock(&storage->lock);
-        #endif
+        /* reached end of list */
+        if (current->next == NULL) {
+            iterEqual++;
+            countEq = countEqCur;
+            countEqCur = 0;
+            mUnlock(&current->lock);
+
+            #ifdef SLEEP
+            usleep(500);
+            #endif
+
+            current = storage->first;
+            continue;
+        }
+
+        /* have not reached end of list yet */
+        mLock(&current->next->lock);
+
+        if (strlen(current->value) == strlen(current->next->value)) {
+            countEqCur++;
+        }
+
+        mUnlock(&current->next->lock);
+        mUnlock(&current->lock);
+
+        current = current->next;
     }
 
     return NULL;
@@ -165,37 +175,55 @@ void *searchEqual(void *arg) {
 
 void *swap(void *arg) {
     Storage *storage = (Storage*) arg;
+    Node *current = storage->first;
     Node *n0, *n1, *n2, *n3;
-    Node *current;
     int rnd;
 
     while (1) {
-        current = storage->first;
+        if (current == NULL) {
+            current = storage->first;
+        }
 
-        #ifdef SLEEP
-        usleep(500);
-        #endif
+        mLock(&current->lock);
 
-        #ifdef LOCK_STORAGE_MUTEX
-        mLock(&storage->lock);
-        #endif
+        /* reached end of list */
+        if (current->next == NULL) {
+            mUnlock(&current->lock);
 
-        while (current != NULL && current->next != NULL && current->next->next != NULL) {
-            rnd = getRandomNumber(1, SWAP_PROB_MODIFIER);
-            if (rnd > 1) {
-                current = current->next;
-                continue;
-            }
+            #ifdef SLEEP
+            usleep(500);
+            #endif
 
-            mLock(&current->lock);
-            mLock(&current->next->lock);
-            mLock(&current->next->next->lock);
+            current = storage->first;
+            continue;
+        }
 
-            n0 = current;
-            n1 = n0->next;
-            n2 = n1->next;
-            n3 = n2->next;
+        mLock(&current->next->lock);
 
+        /* reached end of list */
+        if (current->next->next == NULL) {
+            mUnlock(&current->next->lock);
+            mUnlock(&current->lock);
+
+            #ifdef SLEEP
+            usleep(500);
+            #endif
+
+            current = storage->first;
+            continue;
+        }
+
+        mLock(&current->next->next->lock);
+
+        n0 = current;
+        n1 = n0->next;
+        n2 = n1->next;
+        n3 = n2->next;
+
+        rnd = getRandomNumber(1, SWAP_PROB_MODIFIER);
+
+        /* swap */
+        if (rnd == 1) {
             n0->next = n2;
             n2->next = n1;
             n1->next = n3;
@@ -203,17 +231,13 @@ void *swap(void *arg) {
             mLock(&swapCountLock);
             swapCount++;
             mUnlock(&swapCountLock);
-
-            mUnlock(&n2->lock);
-            mUnlock(&n1->lock);
-            mUnlock(&n0->lock);
-
-            break;
         }
 
-        #ifdef LOCK_STORAGE_MUTEX
-        mUnlock(&storage->lock);
-        #endif
+        mUnlock(&n2->lock);
+        mUnlock(&n1->lock);
+        mUnlock(&n0->lock);
+
+        current = current->next;
     }
 
     return NULL;
