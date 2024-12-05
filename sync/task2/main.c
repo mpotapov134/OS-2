@@ -12,14 +12,14 @@
 
 // #include "queue-spin.h"
 // #include "queue-mutex.h"
-// #include "queue-cond.h"
-#include "queue-sem.h"
+#include "queue-cond.h"
+// #include "queue-sem.h"
 
 #define RED "\033[41m"
 #define NOCOLOR "\033[0m"
 
 #define READER_CPU_BIND 5
-#define WRITER_CPU_BIND 6
+#define WRITER_CPU_BIND 5
 
 void set_cpu(int n) {
 	int err;
@@ -70,7 +70,7 @@ void *writer(void *arg) {
 	set_cpu(WRITER_CPU_BIND);
 
 	while (1) {
-		usleep(1);
+		// usleep(1);
 		int ok = queue_add(q, i);
 		if (!ok) {
 			continue;

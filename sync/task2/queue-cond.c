@@ -45,7 +45,13 @@ queue_t* queue_init(int max_count) {
 		abort();
 	}
 
-	err = pthread_cond_init(&q->cond, NULL);
+	err = pthread_cond_init(&q->cond_empty, NULL);
+	if (err) {
+		printf("queue_init: pthread_cond_init() failed: %s\n", strerror(err));
+		abort();
+	}
+
+	err = pthread_cond_init(&q->cond_full, NULL);
 	if (err) {
 		printf("queue_init: pthread_cond_init() failed: %s\n", strerror(err));
 		abort();
@@ -67,7 +73,8 @@ void queue_destroy(queue_t *q) {
 		queue_get(q, &tmp);
 	}
 	pthread_mutex_destroy(&q->mutex);
-	pthread_cond_destroy(&q->cond);
+	pthread_cond_destroy(&q->cond_empty);
+	pthread_cond_destroy(&q->cond_full);
 	free(q);
 }
 
@@ -79,7 +86,7 @@ int queue_add(queue_t *q, int val) {
 	assert(q->count <= q->max_count);
 
 	while (q->count == q->max_count) {
-		pthread_cond_wait(&q->cond, &q->mutex);
+		pthread_cond_wait(&q->cond_full, &q->mutex);
 	}
 
 	qnode_t *new = malloc(sizeof(qnode_t));
@@ -101,7 +108,9 @@ int queue_add(queue_t *q, int val) {
 	q->count++;
 	q->add_count++;
 
-	pthread_cond_signal(&q->cond);
+	/* if  predictable  scheduling  behavior  is  required,  then that mutex shall be locked by the thread calling
+       pthread_cond_broadcast() or pthread_cond_signal(). */
+	pthread_cond_signal(&q->cond_empty);
 	pthread_mutex_unlock(&q->mutex);
 
 	return 1;
@@ -115,7 +124,7 @@ int queue_get(queue_t *q, int *val) {
 	assert(q->count >= 0);
 
 	while (q->count == 0) {
-		pthread_cond_wait(&q->cond, &q->mutex);
+		pthread_cond_wait(&q->cond_empty, &q->mutex);
 	}
 
 	qnode_t *tmp = q->first;
@@ -127,7 +136,7 @@ int queue_get(queue_t *q, int *val) {
 	q->count--;
 	q->get_count++;
 
-	pthread_cond_signal(&q->cond);
+	pthread_cond_signal(&q->cond_full);
 	pthread_mutex_unlock(&q->mutex);
 
 	return 1;
