@@ -4,6 +4,7 @@
         "futex.h": "c",
         "types.h": "c",
         "stdatomic.h": "c",
-        "sched.h": "c"
+        "sched.h": "c",
+        "spin.h": "c"
     }
 }

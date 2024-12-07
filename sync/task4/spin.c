@@ -11,6 +11,13 @@ void spinlock_lock(spinlock_t *spin) {
             break;
         }
     }
+
+    /* The weak forms ((2) and (4)) of the functions are allowed to fail spuriously,
+     * that is, act as if *obj != *expected even if they are equal. When a
+     * compare-and-exchange is in a loop, the weak version will yield better performance
+     * on some platforms. When a weak compare-and-exchange would require a loop and a
+     * strong one would not, the strong one is preferable.
+     */
 }
 
 void spinlock_unlock(spinlock_t *spin) {

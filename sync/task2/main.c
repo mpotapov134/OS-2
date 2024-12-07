@@ -19,7 +19,7 @@
 #define NOCOLOR "\033[0m"
 
 #define READER_CPU_BIND 5
-#define WRITER_CPU_BIND 5
+#define WRITER_CPU_BIND 6
 
 void set_cpu(int n) {
 	int err;

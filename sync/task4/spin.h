@@ -17,17 +17,3 @@ void spinlock_lock(spinlock_t *spin);
 void spinlock_unlock(spinlock_t *spin);
 
 #endif /* SPIN_H */
-
-
-// #define _GNU_SOURCE
-
-// #include <stdbool.h>
-// #include <stdio.h>
-
-// void spinlock_lock(Spinlock *lock) {
-//     while (__sync_lock_test_and_set(&lock->lock, 1)) {}
-// }
-
-// void spinlock_unlock(Spinlock *lock) {
-//     __sync_lock_release(&lock->lock);
-// }
