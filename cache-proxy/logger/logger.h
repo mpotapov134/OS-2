@@ -14,9 +14,9 @@ struct {
 
 int loggerInit(logLevel_t logLevel);
 void loggerFinalize();
-void loggerCritical(char *msg);
-void loggerError(char *msg);
-void loggerInfo(char *msg);
-void loggerDebug(char *msg);
+void loggerCritical(char *format, ...);
+void loggerError(char *format, ...);
+void loggerInfo(char *format, ...);
+void loggerDebug(char *format, ...);
 
 #endif /* CACHE_PROXY_LOGGER */
