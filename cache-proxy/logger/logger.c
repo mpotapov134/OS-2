@@ -3,31 +3,40 @@
 
 #include "logger.h"
 
-static void loggerWrite(logger_t *logger, char *lvl, char *msg) {
-    fprintf(stderr, "%s: %s\n", lvl, msg);
+static logger_t *logger;
+
+static void loggerLog(logLevel_t requiredLvl, char *lvlText, char *msg) {
+    if (logger->logLevel < requiredLvl) {
+        return;
+    }
+    fprintf(stderr, "%s: %s\n", lvlText, msg);
 }
 
-logger_t *loggerCreate(logLevel_t logLevel) {
-    logger_t *logger = malloc(sizeof(*logger));
+int loggerInit(logLevel_t logLevel) {
+    logger = malloc(sizeof(*logger));
     if (!logger) {
-        return NULL;
+        return -1;
     }
     logger->logLevel = logLevel;
-    return logger;
+    return 0;
 }
 
-void loggerDestroy(logger_t *logger) {
+void loggerFinalize() {
     free(logger);
 }
 
-void loggerError(logger_t *logger, char *msg) {
-    if (logger->logLevel >= LOG_ERROR) {
-        loggerWrite(logger, "ERROR", msg);
-    }
+void loggerCritical(char *msg) {
+    loggerLog(LOG_CRITICAL, "CRITICAL", msg);
 }
 
-void loggerInfo(logger_t *logger, char *msg) {
-    if (logger->logLevel >= LOG_INFO) {
-        loggerWrite(logger, "INFO", msg);
-    }
+void loggerError(char *msg) {
+    loggerLog(LOG_ERROR, "ERROR", msg);
+}
+
+void loggerInfo(char *msg) {
+    loggerLog(LOG_INFO, "INFO", msg);
+}
+
+void loggerDebug(char *msg) {
+    loggerLog(LOG_DEBUG, "DEBUG", msg);
 }
