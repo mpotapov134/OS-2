@@ -15,16 +15,18 @@
 #include "logger/logger.h"
 #include "http-parser/picohttpparser.h"
 
-#define TIMEOUT             10
+#define TIMEOUT             10000
 #define MAX_REQ_SIZE        4096
 #define MAX_NUM_HEADERS     20
 #define MAX_HOST_NAME       256
 #define MAX_RESP_SIZE       (1024 * 50)
 
+typedef struct phr_header phrHeader_t;
+
 typedef struct {
     const char *method;
     const char *path;
-    struct phr_header headers[MAX_NUM_HEADERS];
+    phrHeader_t headers[MAX_NUM_HEADERS];
     size_t methodLen;
     size_t pathLen;
     size_t numHeaders;
@@ -32,24 +34,24 @@ typedef struct {
 } reqParse_t;
 
 static int strEq(const char *s1, const char *s2, size_t len);
-static int findHostName(struct phr_header headers[], size_t numHeaders, char *hostName);
-static int setTimeout(int sock);
+static int setTimeout(int sock, unsigned int ms);
 static void disconnect(int sock);
 static int connectToServ(const char *hostName);
 
-static int sendData(int socket, const char *data, size_t len);
+static phrHeader_t *findHeader(phrHeader_t headers[], size_t numHeaders, const char *name);
+
+static int sendData(int sock, const char *data, size_t len);
 static ssize_t readAndParseRequest(int sock, char *buf, size_t maxLen, reqParse_t *parseData);
 static ssize_t readAndParseResponse(int sock, char *buf, size_t maxLen, reqParse_t *parseData);
 
 int handleClient(int sock) {
     char request[MAX_REQ_SIZE + 1] = {0};
-    char hostName[MAX_HOST_NAME + 1] = {0};
     char response[MAX_RESP_SIZE + 1] = {0};
     ssize_t reqLen, respLen;
     reqParse_t reqParse;
     int err;
 
-    err = setTimeout(sock);
+    err = setTimeout(sock, TIMEOUT);
     if (err) {
         loggerError("Failed to set timeout for client, error: %s", strerror(errno));
         disconnect(sock);
@@ -73,12 +75,15 @@ int handleClient(int sock) {
         return -1;
     }
 
-    err = findHostName(reqParse.headers, reqParse.numHeaders, hostName);
-    if (err) {
+    phrHeader_t *hostHeader = findHeader(reqParse.headers, reqParse.numHeaders, "Host");
+    if (!hostHeader) {
         loggerError("Failed to fetch host name");
         disconnect(sock);
         return -1;
     }
+    char hostName[hostHeader->value_len + 1];
+    memcpy(hostName, hostHeader->value, hostHeader->value_len);
+    hostName[hostHeader->value_len] = 0;
 
     int sockToServ = connectToServ(hostName);
     if (sockToServ < 0) {
@@ -121,17 +126,17 @@ static int strEq(const char *s1, const char *s2, size_t len) {
     return strncmp(s1, s2, len) == 0;
 }
 
-static int findHostName(struct phr_header headers[], size_t numHeaders, char *hostName) {
-    for (size_t i = 0; i < numHeaders; i++) {
-        if (headers[i].name_len == 4 && strEq(headers[i].name, "Host", 4)) {
-            if (headers[i].value_len > MAX_HOST_NAME) return -1;
+static int setTimeout(int sock, unsigned int ms) {
+    struct timeval timeout;
+    timeout.tv_sec = ms / 1000;
+    timeout.tv_usec = ms % 1000 * 1000;
 
-            memcpy(hostName, headers[i].value, headers[i].value_len);
-            hostName[headers[i].value_len] = 0;
-            return 0;
-        }
+    int err1 = setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    int err2 = setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+    if (err1 || err2) {
+        return -1;
     }
-    return -1;
+    return 0;
 }
 
 static void disconnect(int sock) {
@@ -143,29 +148,31 @@ static int connectToServ(const char *hostName) {
     struct addrinfo *addrInfo;
     int err;
 
-    err = getaddrinfo(hostName, "http", NULL, &addrInfo);
-    if (err) {
-        loggerError("connectToServ: address resolution failed");
-        return -1;
-    }
-
     int sockToServ = socket(AF_INET, SOCK_STREAM, 0);
     if (!sockToServ) {
         loggerError("connectToServ: failed to create new socket");
         return -1;
     }
 
-    err = setTimeout(sockToServ);
+    err = setTimeout(sockToServ, TIMEOUT);
     if (err) {
-        loggerError("Failed to set timeout for server, error: %s", strerror(errno));
+        loggerError("connectToServ: failed to set timeout, error: %s", strerror(errno));
+        close(sockToServ);
+        return -1;
+    }
+
+    err = getaddrinfo(hostName, "http", NULL, &addrInfo);
+    if (err) {
+        loggerError("connectToServ: failed to resolve server address");
         close(sockToServ);
         return -1;
     }
 
     err = connect(sockToServ, addrInfo->ai_addr, addrInfo->ai_addrlen);
     if (err) {
-        loggerError("Failed to connect to server, error: %s", strerror(errno));
+        loggerError("connectToServ: failed to connect, error: %s", strerror(errno));
         close(sockToServ);
+        freeaddrinfo(addrInfo);
         return -1;
     }
 
@@ -173,25 +180,22 @@ static int connectToServ(const char *hostName) {
     return sockToServ;
 }
 
-static int setTimeout(int sock) {
-    struct timeval timeout;
-    timeout.tv_sec = TIMEOUT;
-    timeout.tv_usec = 0;
-
-    int err1 = setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-    int err2 = setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
-    if (err1 || err2) {
-        return -1;
+static phrHeader_t *findHeader(phrHeader_t headers[], size_t numHeaders, const char *name) {
+    size_t len = strlen(name);
+    for (size_t i = 0; i < numHeaders; i++) {
+        if (headers[i].name_len == len && strEq(headers[i].name, name, len)) {
+            return &headers[i];
+        }
     }
-    return 0;
+    return NULL;
 }
 
-static int sendData(int socket, const char *data, size_t len) {
+static int sendData(int sock, const char *data, size_t len) {
     ssize_t sentTotal = 0;
     ssize_t sent;
 
     while (sentTotal != len) {
-        sent = write(socket, data + sentTotal, len - sentTotal);
+        sent = write(sock, data + sentTotal, len - sentTotal);
         if (sent == -1) return -1;
         sentTotal += sent;
     }
@@ -280,19 +284,19 @@ static ssize_t readAndParseResponse(int sock, char *buf, size_t maxLen, reqParse
         return -1;
     }
 
-    size_t nameLen = strlen("Content-Length");
-    char contentLen[100] = {0};
-    size_t contLen = 0;
-    for (size_t i = 0; i < parseData->numHeaders; i++) {
-        struct phr_header header = parseData->headers[i];
-        if (header.name_len == nameLen && strEq(header.name, "Content-Length", nameLen)) {
-            memcpy(contentLen, header.value, header.value_len);
-            contLen = atoi(contentLen);
-            break;
-        }
-    }
-    if (contLen == 0) {
+    phrHeader_t *contLenHeader = findHeader(parseData->headers, parseData->numHeaders, "Content-Length");
+    if (!contLenHeader) {
         loggerError("Content length is not specified");
+        return -1;
+    }
+    char contentLength[contLenHeader->value_len + 1];
+    memcpy(contentLength, contLenHeader->value, contLenHeader->value_len);
+    contentLength[contLenHeader->value_len] = 0;
+
+    int contLen;
+    contLen = atoi(contentLength);
+    if (contLen < 0) {
+        loggerError("Invalid content length");
         return -1;
     }
 
