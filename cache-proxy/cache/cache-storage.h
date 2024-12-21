@@ -9,7 +9,6 @@
 
 typedef struct _node {
     char *request;
-    size_t requestLen;
     cacheEntry_t *response;
     struct _node *next;
 } node_t;
@@ -21,8 +20,8 @@ struct {
 
 cacheStorage_t *cacheStorageCreate();
 void cacheStorageDestroy(cacheStorage_t *storage);
-int cacheStoragePut(cacheStorage_t *storage, char *req, size_t reqLen, cacheEntry_t *resp);
-cacheEntry_t *cacheStorageGet(cacheStorage_t *storage, char *req, size_t reqLen);
-int cacheStorageRemove(cacheStorage_t *storage, char *req, size_t reqLen);
+int cacheStoragePut(cacheStorage_t *storage, char *req, cacheEntry_t *resp);
+cacheEntry_t *cacheStorageGet(cacheStorage_t *storage, char *req);
+int cacheStorageRemove(cacheStorage_t *storage, char *req);
 
 #endif /* CACHE_PROXY_CACHE_STORAGE */

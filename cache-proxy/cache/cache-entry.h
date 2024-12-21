@@ -1,6 +1,8 @@
 #ifndef CACHE_PROXY_CACHE_ENTRY
 #define CACHE_PROXY_CACHE_ENTRY
 
+#define _GNU_SOURCE
+
 #include <pthread.h>
 #include <stdatomic.h>
 
@@ -8,7 +10,9 @@ struct {
     char *buf;
     size_t size;
     size_t capacity;
-    atomic_int referenceCount;
+
+    int refCount;
+    pthread_spinlock_t lock;
 } typedef cacheEntry_t;
 
 cacheEntry_t *cacheEntryCreate();

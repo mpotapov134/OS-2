@@ -12,8 +12,8 @@ static unsigned int hash(const char *str, size_t len) {
     return hash % MAP_SIZE;
 }
 
-static int strEq(char *s1, char *s2, size_t len) {
-    return strncmp(s1, s2, len) == 0;
+static int strEq(char *s1, char *s2) {
+    return strcmp(s1, s2) == 0;
 }
 
 cacheStorage_t *cacheStorageCreate() {
@@ -44,7 +44,8 @@ void cacheStorageDestroy(cacheStorage_t *storage) {
             node_t* temp = current;
             current = current->next;
 
-            cacheEntryDereference(temp->response);  // очищаем ресурсы ноды и удаляем ссылку
+            /* удаляем ссылку и очищаем ресурсы ноды */
+            cacheEntryDereference(temp->response);
             free(temp->request);
             free(temp);
         }
@@ -58,24 +59,25 @@ void cacheStorageDestroy(cacheStorage_t *storage) {
     loggerDebug("cacheStorageDestroy: destroyed %p", storage);
 }
 
-int cacheStoragePut(cacheStorage_t *storage, char *req, size_t reqLen, cacheEntry_t *resp) {
+int cacheStoragePut(cacheStorage_t *storage, char *req, cacheEntry_t *resp) {
     if (!storage || !req || !resp) return -1;
 
     pthread_mutex_lock(&storage->mutex);
 
+    size_t reqLen = strlen(req);
     unsigned long index = hash(req, reqLen);
     node_t *current = storage->map[index];
 
     /* Проверяем на наличие записи по данному запросу */
     while (current) {
-        if (strEq(current->request, req, reqLen)) {         // запись найдена
+        if (strEq(current->request, req)) {                 // запись найдена
             if (current->response != resp) {
                 cacheEntryDereference(current->response);   // удаляем ссылку на старый ответ
                 current->response = resp;                   // заменяем на новый ответ
                 cacheEntryReference(resp);                  // добавлена ссылка на новый ответ
+                loggerDebug("cacheStoragePut: modified node, key '%s'", req);
             }
 
-            loggerDebug("cacheStoragePut: modified node, key '%s'", req);
             pthread_mutex_unlock(&storage->mutex);
             return 0;
         }
@@ -83,9 +85,8 @@ int cacheStoragePut(cacheStorage_t *storage, char *req, size_t reqLen, cacheEntr
     }
 
     /* Запись не найдена, создаем новую */
-    loggerDebug("cacheStoragePut: created new node, key '%s'", req);
     node_t *newNode = malloc(sizeof(*newNode));
-    char *request = malloc(reqLen);
+    char *request = malloc((reqLen + 1) * sizeof(*request));
     if (!newNode || !request) {
         free(newNode);
         free(request);
@@ -94,8 +95,8 @@ int cacheStoragePut(cacheStorage_t *storage, char *req, size_t reqLen, cacheEntr
     }
 
     memcpy(request, req, reqLen);           // сохраняем содержимое запроса
+    request[reqLen] = 0;
     newNode->request = request;
-    newNode->requestLen = reqLen;
 
     newNode->response = resp;
     cacheEntryReference(resp);              // добавлена ссылка на новый ответ
@@ -103,20 +104,22 @@ int cacheStoragePut(cacheStorage_t *storage, char *req, size_t reqLen, cacheEntr
     newNode->next = storage->map[index];    // добавлем в начало списка
     storage->map[index] = newNode;
 
+    loggerDebug("cacheStoragePut: created new node, key '%s'", req);
     pthread_mutex_unlock(&storage->mutex);
     return 0;
 }
 
-cacheEntry_t *cacheStorageGet(cacheStorage_t *storage, char *req, size_t reqLen) {
+cacheEntry_t *cacheStorageGet(cacheStorage_t *storage, char *req) {
     if (!storage || !req) return NULL;
 
     pthread_mutex_lock(&storage->mutex);
 
+    size_t reqLen = strlen(req);
     unsigned long index = hash(req, reqLen);
     node_t *current = storage->map[index];
 
     while (current) {
-        if (strEq(current->request, req, reqLen)) {     // запись найдена
+        if (strEq(current->request, req)) {             // запись найдена
             cacheEntryReference(current->response);     // добавили ссылку на эту запись
             loggerDebug("cacheStorageGet: found node, key '%s'", current->request);
             pthread_mutex_unlock(&storage->mutex);
@@ -129,17 +132,18 @@ cacheEntry_t *cacheStorageGet(cacheStorage_t *storage, char *req, size_t reqLen)
     return NULL;
 }
 
-int cacheStorageRemove(cacheStorage_t *storage, char *req, size_t reqLen) {
+int cacheStorageRemove(cacheStorage_t *storage, char *req) {
     if (!storage || !req) return -1;
 
     pthread_mutex_lock(&storage->mutex);
 
+    size_t reqLen = strlen(req);
     unsigned long index = hash(req, reqLen);
     node_t* current = storage->map[index];
     node_t* previous = NULL;
 
     while (current) {
-        if (strEq(current->request, req, reqLen)) {         // запись найдена
+        if (strEq(current->request, req)) {                 // запись найдена
             if (previous) {
                 previous->next = current->next;
             } else {

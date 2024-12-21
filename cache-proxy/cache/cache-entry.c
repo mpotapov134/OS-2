@@ -7,13 +7,9 @@
 #define CHUNK_SIZE          1024
 
 cacheEntry_t *cacheEntryCreate() {
-    cacheEntry_t *entry = malloc(sizeof(*entry));
+    cacheEntry_t *entry = calloc(1, sizeof(*entry));
     if (!entry) return NULL;
-
-    entry->buf = NULL;
-    entry->size = 0;
-    entry->capacity = 0;
-    entry->referenceCount = 0;
+    pthread_spin_init(&entry->lock, 0);
 
     loggerDebug("cacheEntryCreate: created %p", entry);
 
@@ -24,6 +20,7 @@ void cacheEntryDestroy(cacheEntry_t *entry) {
     if (!entry) return;
     free(entry->buf);
     entry->buf = NULL;
+    pthread_spin_destroy(&entry->lock);
     free(entry);
 
     loggerDebug("cacheEntryDestroy: destroyed %p", entry);
@@ -51,14 +48,18 @@ int cacheEntryAppend(cacheEntry_t *entry, char *newData, size_t size) {
 }
 
 void cacheEntryReference(cacheEntry_t *entry) {
-    atomic_fetch_add(&entry->referenceCount, 1);
-    loggerDebug("cacheEntryReference: %p", entry);
+    pthread_spin_lock(&entry->lock);
+    entry->refCount++;
+    pthread_spin_unlock(&entry->lock);
 }
 
 void cacheEntryDereference(cacheEntry_t *entry) {
-    atomic_fetch_sub(&entry->referenceCount, 1);
-    loggerDebug("cacheEntryDereference: %p", entry);
-    if (entry->referenceCount == 0) {
+    pthread_spin_lock(&entry->lock);
+    entry->refCount--;
+    if (entry->refCount == 0) {
+        pthread_spin_unlock(&entry->lock);
         cacheEntryDestroy(entry);
+        return;
     }
+    pthread_spin_unlock(&entry->lock);
 }
