@@ -27,9 +27,7 @@ void cacheEntryDestroy(cacheEntry_t *entry) {
 }
 
 int cacheEntryAppend(cacheEntry_t *entry, char *newData, size_t size) {
-    if (!entry || !newData) {
-        return -1;
-    }
+    if (!entry || !newData) return 0;
 
     size_t newSize = entry->size + size;
     if (entry->capacity < newSize) {
@@ -48,12 +46,14 @@ int cacheEntryAppend(cacheEntry_t *entry, char *newData, size_t size) {
 }
 
 void cacheEntryReference(cacheEntry_t *entry) {
+    if (!entry) return;
     pthread_spin_lock(&entry->lock);
     entry->refCount++;
     pthread_spin_unlock(&entry->lock);
 }
 
 void cacheEntryDereference(cacheEntry_t *entry) {
+    if (!entry) return;
     pthread_spin_lock(&entry->lock);
     entry->refCount--;
     if (entry->refCount == 0) {

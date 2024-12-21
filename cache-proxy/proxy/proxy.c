@@ -39,7 +39,12 @@ static int createServSocket() {
     return servSocket;
 }
 
-proxy_t *proxyCreate() {
+proxy_t *proxyCreate(cacheStorage_t *cache) {
+    if (!cache) {
+        loggerError("proxyCreate: invalid cache");
+        return NULL;
+    }
+
     proxy_t *proxy = malloc(sizeof(*proxy));
     if (!proxy) {
         loggerError("proxyCreate: allocation failed");
@@ -51,6 +56,8 @@ proxy_t *proxyCreate() {
         free(proxy);
         return NULL;
     }
+
+    proxy->cache = cache;
 
     return proxy;
 }
@@ -77,7 +84,7 @@ int proxyStart(proxy_t *proxy) {
         }
 
         loggerInfo("Accepted new connection");
-        handleClient(clientSocket);
+        handleClient(clientSocket, proxy->cache);
     }
 
     return 0;

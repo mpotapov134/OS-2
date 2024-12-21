@@ -15,11 +15,10 @@
 #include "logger/logger.h"
 #include "http-parser/picohttpparser.h"
 
-#define TIMEOUT             10000
+#define TIMEOUT             3000
 #define MAX_REQ_SIZE        4096
 #define MAX_NUM_HEADERS     20
-#define MAX_HOST_NAME       256
-#define MAX_RESP_SIZE       (1024 * 50)
+#define READ_BUF_LEN        4096
 
 typedef struct phr_header phrHeader_t;
 
@@ -33,94 +32,129 @@ typedef struct {
     int minorVersion;
 } reqParse_t;
 
+typedef struct {
+    int minorVersion;
+    int status;
+    const char *msg;
+    size_t msgLen;
+    phrHeader_t headers[MAX_NUM_HEADERS];
+    size_t numHeaders;
+} respParse_t;
+
 static int strEq(const char *s1, const char *s2, size_t len);
 static int setTimeout(int sock, unsigned int ms);
 static void disconnect(int sock);
 static int connectToServ(const char *hostName);
 
 static phrHeader_t *findHeader(phrHeader_t headers[], size_t numHeaders, const char *name);
+static size_t getContentLen();
 
 static int sendData(int sock, const char *data, size_t len);
 static ssize_t readAndParseRequest(int sock, char *buf, size_t maxLen, reqParse_t *parseData);
-static ssize_t readAndParseResponse(int sock, char *buf, size_t maxLen, reqParse_t *parseData);
+static ssize_t handleResponse(int sockToServ, int sockToClient, cacheEntry_t **cacheEntry);
 
-int handleClient(int sock) {
+int handleClient(int sockToClient, cacheStorage_t *cache) {
+    int sockToServ;
     char request[MAX_REQ_SIZE + 1] = {0};
-    char response[MAX_RESP_SIZE + 1] = {0};
+    cacheEntry_t *cacheEntry = NULL;
     ssize_t reqLen, respLen;
     reqParse_t reqParse;
     int err;
 
-    err = setTimeout(sock, TIMEOUT);
+    err = setTimeout(sockToClient, TIMEOUT);
     if (err) {
         loggerError("Failed to set timeout for client, error: %s", strerror(errno));
-        disconnect(sock);
+        disconnect(sockToClient);
         return -1;
     }
 
-    reqLen = readAndParseRequest(sock, request, MAX_REQ_SIZE, &reqParse);
+    reqLen = readAndParseRequest(sockToClient, request, MAX_REQ_SIZE, &reqParse);
     if (reqLen < 0) {
         loggerError("Failed to read client request");
-        disconnect(sock);
+        disconnect(sockToClient);
         return -1;
     }
+    char path[reqParse.pathLen + 1];
+    memcpy(path, reqParse.path, reqParse.pathLen);
+    path[reqParse.pathLen] = 0;
 
-    if (strEq(reqParse.method, "GET", 3)) {
-        loggerInfo("GET");
-    } else if (strEq(reqParse.method, "PUT", 3) || strEq(reqParse.method, "POST", 4)) {
-        loggerInfo("PUT | POST");
-    } else {
+    if (!strEq(reqParse.method, "GET", 3)) {
         loggerError("Unsupported method");
-        disconnect(sock);
+        disconnect(sockToClient);
         return -1;
     }
 
+    loggerDebug("%s", request);
+
+    /* Поиск записи в кэше и отправка */
+    cacheEntry = cacheStorageGet(cache, path);
+    if (cacheEntry) {
+        loggerDebug("Found cache entry for resource %s", path);
+
+        err = sendData(sockToClient, cacheEntry->buf, cacheEntry->size);
+        cacheEntryDereference(cacheEntry);
+        disconnect(sockToClient);
+
+        if (err) {
+            loggerError("Failed to send response to client");
+            return -1;
+        }
+
+        return 0;
+    }
+
+    /* Запись не найдена, обращаемся к серверу */
+    loggerDebug("Cache entry for resource %s not found", path);
+
+    /* Определяем доменное имя сервера */
     phrHeader_t *hostHeader = findHeader(reqParse.headers, reqParse.numHeaders, "Host");
     if (!hostHeader) {
         loggerError("Failed to fetch host name");
-        disconnect(sock);
+        disconnect(sockToClient);
         return -1;
     }
     char hostName[hostHeader->value_len + 1];
     memcpy(hostName, hostHeader->value, hostHeader->value_len);
     hostName[hostHeader->value_len] = 0;
 
-    int sockToServ = connectToServ(hostName);
+    sockToServ = connectToServ(hostName);
     if (sockToServ < 0) {
-        disconnect(sock);
+        loggerError("Failed to connect to %s", hostName);
+        disconnect(sockToClient);
         return -1;
     }
-    loggerInfo("Connected successfully");
+    loggerDebug("Connected to server %s", hostName);
 
     err = sendData(sockToServ, request, reqLen);
     if (err) {
         loggerError("Failed to send request to server, error: %s", strerror(errno));
-        disconnect(sock);
+        disconnect(sockToClient);
         disconnect(sockToServ);
         return -1;
     }
-    loggerInfo("Sent request");
+    loggerDebug("Sent request of %ld bytes to server %s", reqLen, hostName);
 
-    respLen = readAndParseResponse(sockToServ, response, MAX_RESP_SIZE, &reqParse);
+    respLen = handleResponse(sockToServ, sockToClient, &cacheEntry);
     if (respLen < 0) {
-        loggerError("Failed to get response, error: %s", strerror(errno));
-        disconnect(sock);
+        loggerError("Error handling response");
+        disconnect(sockToClient);
         disconnect(sockToServ);
         return -1;
     }
+    loggerDebug("Server %s responded with %ld bytes", hostName, respLen);
 
-    err = sendData(sock, response, respLen);
-    if (err) {
-        loggerError("Failed to send back to client");
-        disconnect(sock);
-        disconnect(sockToServ);
-        return -1;
+    if (cacheEntry) {
+        err = cacheStoragePut(cache, path, cacheEntry);
+        if (err) {
+            loggerError("Failed to cache response to %s", path);
+        }
+        loggerDebug("Cached response to %s", path);
     }
 
-    disconnect(sock);
-    disconnect(sockToServ);
     return 0;
 }
+
+
 
 static int strEq(const char *s1, const char *s2, size_t len) {
     return strncmp(s1, s2, len) == 0;
@@ -180,6 +214,8 @@ static int connectToServ(const char *hostName) {
     return sockToServ;
 }
 
+
+
 static phrHeader_t *findHeader(phrHeader_t headers[], size_t numHeaders, const char *name) {
     size_t len = strlen(name);
     for (size_t i = 0; i < numHeaders; i++) {
@@ -188,6 +224,19 @@ static phrHeader_t *findHeader(phrHeader_t headers[], size_t numHeaders, const c
         }
     }
     return NULL;
+}
+
+static size_t getContentLen(phrHeader_t headers[], size_t numHeaders) {
+    phrHeader_t *contLenHeader = findHeader(headers, numHeaders, "Content-Length");
+    if (!contLenHeader) return 0;
+
+    char contentLength[contLenHeader->value_len + 1];
+    memcpy(contentLength, contLenHeader->value, contLenHeader->value_len);
+    contentLength[contLenHeader->value_len] = 0;
+
+    long long contLen = atoll(contentLength);
+    if (contLen < 0) return 0;
+    return contLen;
 }
 
 static int sendData(int sock, const char *data, size_t len) {
@@ -201,6 +250,8 @@ static int sendData(int sock, const char *data, size_t len) {
     }
     return 0;
 }
+
+
 
 static ssize_t readAndParseRequest(int sock, char *buf, size_t maxLen, reqParse_t *parseData) {
     int pret;
@@ -230,7 +281,6 @@ static ssize_t readAndParseRequest(int sock, char *buf, size_t maxLen, reqParse_
         );
 
         if (pret > 0) {
-            loggerInfo("Parsed successfully");
             break;
         }
 
@@ -250,16 +300,23 @@ static ssize_t readAndParseRequest(int sock, char *buf, size_t maxLen, reqParse_
     return buflen;
 }
 
-static ssize_t readAndParseResponse(int sock, char *buf, size_t maxLen, reqParse_t *parseData) {
+static ssize_t handleResponse(int sockToServ, int sockToClient, cacheEntry_t **cacheEntry) {
+    char buf[READ_BUF_LEN + 1];
+    respParse_t parse;
+    cacheEntry_t *newCache = NULL;
     ssize_t recvd;
-    size_t bufLen = 0, headerLen, msgLen;
+    size_t recvdTotal = 0, headerLen, contentLen;
     char *headerEnd;
-    const char *msg;
-    int status;
-    int pret;
+    int err;
 
+    /* Ищем конец секции заголовков */
     do {
-        recvd = read(sock, buf + bufLen, maxLen - bufLen);
+        if (recvdTotal == READ_BUF_LEN) {
+            loggerError("Receive error: headers section is too long");
+            return -1;
+        }
+
+        recvd = read(sockToServ, buf + recvdTotal, READ_BUF_LEN - recvdTotal);
         if (recvd == -1) {
             loggerError("Receive error: %s", strerror(errno));
             return -1;
@@ -268,56 +325,85 @@ static ssize_t readAndParseResponse(int sock, char *buf, size_t maxLen, reqParse
             loggerError("Receive error: server disconnected");
             return -1;
         }
-        bufLen += recvd;
-        buf[bufLen] = 0;
+
+        recvdTotal += recvd;
+        buf[recvdTotal] = 0;
     } while ((headerEnd = strstr(buf, "\r\n\r\n")) == NULL);
     headerEnd += strlen("\r\n\r\n");
     headerLen = headerEnd - buf;
 
-    parseData->numHeaders = sizeof(parseData->headers) / sizeof(parseData->headers[0]);
-    pret = phr_parse_response(
-        buf, headerLen, &parseData->minorVersion, &status, &msg, &msgLen,
-        parseData->headers, &parseData->numHeaders, 0
+    /* Парсим секцию заголовков */
+    parse.numHeaders = sizeof(parse.headers) / sizeof(parse.headers[0]);
+    err = phr_parse_response(
+        buf, headerLen, &parse.minorVersion, &parse.status, &parse.msg,
+        &parse.msgLen, parse.headers, &parse.numHeaders, 0
     );
-    if (pret < 0) {
-        loggerError("Failed to parse response, error: %i", pret);
+    if (err < 0) {
+        loggerError("Failed to parse response, error: %i", err);
         return -1;
     }
 
-    phrHeader_t *contLenHeader = findHeader(parseData->headers, parseData->numHeaders, "Content-Length");
-    if (!contLenHeader) {
-        loggerError("Content length is not specified");
-        return -1;
-    }
-    char contentLength[contLenHeader->value_len + 1];
-    memcpy(contentLength, contLenHeader->value, contLenHeader->value_len);
-    contentLength[contLenHeader->value_len] = 0;
+    contentLen = getContentLen(parse.headers, parse.numHeaders);
 
-    int contLen;
-    contLen = atoi(contentLength);
-    if (contLen < 0) {
-        loggerError("Invalid content length");
+    /* Отправляем клиенту все данные, полученные на текущий момент */
+    err = sendData(sockToClient, buf, recvdTotal);
+    if (err) {
+        loggerError("Failed to send data back to client");
         return -1;
     }
 
-    size_t reqLen = contLen + headerLen;
-    while (bufLen != reqLen) {
-        recvd = read(sock, buf + bufLen, reqLen - bufLen);
-        if (recvd <= 0) {
-            loggerError("Failed to receive body");
-            loggerDebug("BUFLEN %ld", bufLen);
-            loggerDebug("REQLEN %ld", reqLen);
+    /* Если ответ успешный, создаем для него кэш-запись */
+    if (parse.status == 200) {
+        newCache = cacheEntryCreate();
+        if (!newCache) {
+            loggerError("Failed to create new cache entry");
             return -1;
         }
-        bufLen += recvd;
     }
-    buf[bufLen] = 0;
 
-    loggerDebug(
-        "Total recv: %ld\n"
-        "Header: %ld\n"
-        "Content: %ld", bufLen, headerLen, contLen
-    );
+    /* Добавляем в запись все данные, полученные на текущий момент */
+    err = cacheEntryAppend(newCache, buf, recvdTotal);
+    if (err) {
+        loggerError("Failed to append data to cache entry");
+        goto error;
+    }
 
-    return bufLen;
+    loggerDebug("%s", buf);
+
+    /* Получаем оставшиеся данные от сервера, пересылаем клиенту и сохраняем в кэш */
+    ssize_t remaining = headerLen + contentLen - recvdTotal;
+    loggerDebug("REMAINING: %ld", remaining);
+    while (remaining > 0) {
+        recvd = read(sockToServ, buf, READ_BUF_LEN);
+        loggerDebug("RECVD: %ld", recvd);
+        if (recvd == -1) {
+            loggerError("Receive error: %s", strerror(errno));
+            return -1;
+        }
+        if (recvd == 0) {
+            loggerError("Receive error: server disconnected");
+            return -1;
+        }
+        remaining -= recvd;
+        recvdTotal += recvd;
+
+        err = sendData(sockToClient, buf, recvd);
+        if (err) {
+            loggerError("Failed to send data back to client");
+            goto error;
+        }
+
+        err = cacheEntryAppend(newCache, buf, recvd);
+        if (err) {
+            loggerError("Failed to append data to cache entry");
+            goto error;
+        }
+    }
+
+    *cacheEntry = newCache;
+    return recvdTotal;
+
+    error:
+        cacheEntryDestroy(newCache);
+        return -1;
 }
