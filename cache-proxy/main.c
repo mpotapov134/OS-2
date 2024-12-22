@@ -1,3 +1,7 @@
+#define _GNU_SOURCE
+
+#include <errno.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,8 +14,28 @@
 #define NUM_WORKERS             16
 #define TASK_QUEUE_CAP          100
 
+proxy_t *proxy;
+
+void stop(int sig) {
+    if (!proxy) return;
+    proxy->running = 0;
+    loggerInfo("Stopped proxy");
+}
+
 int main(int argc, char **argv) {
+    int err;
     loggerInit(LOG_DEBUG);
+
+    struct sigaction act;
+    act.sa_handler = stop;
+    sigemptyset(&act.sa_mask);
+    act.sa_flags = 0;
+
+    err = sigaction(SIGINT, &act, NULL);
+    if (err) {
+        loggerCritical("Failed to setup SIGINT handler, error: %s", strerror(errno));
+        abort();
+    }
 
     cacheStorage_t *cache = cacheStorageCreate();
     if (!cache) {
@@ -25,13 +49,13 @@ int main(int argc, char **argv) {
         abort();
     }
 
-    proxy_t *proxy = proxyCreate(cache, threadpool);
+    proxy = proxyCreate(cache, threadpool);
     if (!proxy) {
         loggerCritical("Error creating proxy");
         abort();
     }
 
-    int err = proxyStart(proxy);
+    err = proxyStart(proxy);
     if (err) {
         loggerCritical("Error starting proxy");
         abort();
