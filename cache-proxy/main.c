@@ -5,6 +5,10 @@
 #include "cache/cache-storage.h"
 #include "logger/logger.h"
 #include "proxy/proxy.h"
+#include "threadpool/threadpool.h"
+
+#define NUM_WORKERS             16
+#define TASK_QUEUE_CAP          100
 
 int main(int argc, char **argv) {
     loggerInit(LOG_DEBUG);
@@ -15,7 +19,13 @@ int main(int argc, char **argv) {
         abort();
     }
 
-    proxy_t *proxy = proxyCreate(cache);
+    threadPool_t *threadpool = threadPoolCreate(NUM_WORKERS, TASK_QUEUE_CAP);
+    if (!threadpool) {
+        loggerCritical("Failed to create threadpool");
+        abort();
+    }
+
+    proxy_t *proxy = proxyCreate(cache, threadpool);
     if (!proxy) {
         loggerCritical("Error creating proxy");
         abort();
@@ -28,6 +38,8 @@ int main(int argc, char **argv) {
     }
 
     proxyDestroy(proxy);
+    threadPoolStop(threadpool);
+    cacheStorageDestroy(cache);
 
     loggerFinalize();
     return 0;

@@ -11,7 +11,7 @@
 #include "proxy.h"
 
 #define PORT            80
-#define BACKLOG         10
+#define BACKLOG         30
 
 static int createServSocket() {
     int servSocket = socket(AF_INET, SOCK_STREAM, 0);
@@ -39,7 +39,7 @@ static int createServSocket() {
     return servSocket;
 }
 
-proxy_t *proxyCreate(cacheStorage_t *cache) {
+proxy_t *proxyCreate(cacheStorage_t *cache, threadPool_t *threadpool) {
     if (!cache) {
         loggerError("proxyCreate: invalid cache");
         return NULL;
@@ -58,6 +58,7 @@ proxy_t *proxyCreate(cacheStorage_t *cache) {
     }
 
     proxy->cache = cache;
+    proxy->threadpool = threadpool;
 
     return proxy;
 }
@@ -79,12 +80,23 @@ int proxyStart(proxy_t *proxy) {
     while (proxy->running) {
         int clientSocket = accept(proxy->servSocket, NULL, NULL);
         if (clientSocket < 0) {
-            loggerError("Error accepting connection");
+            loggerError("Error accepting connection: %s", strerror(errno));
             continue;
         }
 
         loggerInfo("Accepted new connection");
-        handleClient(clientSocket, proxy->cache);
+
+        clientHandlerArgs_t *args = malloc(sizeof(*args));
+        if (!args) {
+            loggerError("Failed to allocate memory for client handler arguments");
+            shutdown(clientSocket, SHUT_RDWR);
+            close(clientSocket);
+            continue;
+        }
+
+        args->sockToClient = clientSocket;
+        args->cache = proxy->cache;
+        threadPoolSubmit(proxy->threadpool, handleClient, args);
     }
 
     return 0;

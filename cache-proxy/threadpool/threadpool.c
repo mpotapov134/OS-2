@@ -112,8 +112,6 @@ static void *workerRoutine(void *arg) {
         pthread_cond_signal(&pool->gotSlots);
         pthread_mutex_unlock(&pool->mutex);
 
-        loggerDebug("Task %d started", task.id);
         task.run(task.arg);
-        loggerDebug("Task %d finished", task.id);
     }
 }
