@@ -20,15 +20,17 @@ static void disconnect(int sock);
 static int connectToServ(const char *hostName);
 
 static phrHeader_t *findHeader(phrHeader_t headers[], size_t numHeaders, const char *name);
-static size_t getContentLen();
+static size_t getContentLen(phrHeader_t headers[], size_t numHeaders);
 
 static int sendData(int sock, const char *data, size_t len);
+static int sendFromCache(int sock, cacheEntry_t *cache);
+
 static ssize_t readAndParseRequest(int sock, char *buf, size_t maxLen, reqParse_t *parseData);
-static ssize_t handleResponse(int sockToServ, int sockToClient, cacheEntry_t **cacheEntry, int *status);
+static ssize_t handleResponse(int sockToServ, int sockToClient, char *req, cacheStorage_t *cacheStorage, int *status);
 
 void handleClient(void *args) {
     int sockToClient = ((clientHandlerArgs_t*) args)->sockToClient;
-    cacheStorage_t *cache = ((clientHandlerArgs_t*) args)->cache;
+    cacheStorage_t *cacheStorage = ((clientHandlerArgs_t*) args)->cache;
     free(args);
 
     int sockToServ;
@@ -62,11 +64,11 @@ void handleClient(void *args) {
     }
 
     /* Поиск записи в кэше и отправка */
-    cacheEntry = cacheStorageGet(cache, path);
+    cacheEntry = cacheStorageGet(cacheStorage, path);
     if (cacheEntry) {
         loggerDebug("Found cache entry for resource %s", path);
 
-        err = sendData(sockToClient, cacheEntry->buf, cacheEntry->size);
+        err = sendFromCache(sockToClient, cacheEntry);
         cacheEntryDereference(cacheEntry);
         disconnect(sockToClient);
 
@@ -108,7 +110,7 @@ void handleClient(void *args) {
     loggerDebug("Sent request of %ld bytes to server %s", reqLen, hostName);
 
     int status;
-    respLen = handleResponse(sockToServ, sockToClient, &cacheEntry, &status);
+    respLen = handleResponse(sockToServ, sockToClient, path, cacheStorage, &status);
     if (respLen < 0) {
         loggerError("Error handling response");
         disconnect(sockToClient);
@@ -116,14 +118,6 @@ void handleClient(void *args) {
         return;
     }
     loggerInfo("Server %s responded with %ld bytes, status: %d", hostName, respLen, status);
-
-    if (cacheEntry) {
-        err = cacheStoragePut(cache, path, cacheEntry);
-        if (err) {
-            loggerError("Failed to cache response to %s", path);
-        }
-        loggerDebug("Cached response to %s", path);
-    }
 
     disconnect(sockToClient);
     disconnect(sockToServ);
@@ -214,6 +208,8 @@ static size_t getContentLen(phrHeader_t headers[], size_t numHeaders) {
     return contLen;
 }
 
+
+
 static int sendData(int sock, const char *data, size_t len) {
     ssize_t sentTotal = 0;
     ssize_t sent;
@@ -224,6 +220,41 @@ static int sendData(int sock, const char *data, size_t len) {
         sentTotal += sent;
     }
     return 0;
+}
+
+static int sendFromCache(int sock, cacheEntry_t *cache) {
+    size_t sentTotal = 0;
+    size_t lenToSend;
+    int err, ret;
+
+    pthread_mutex_lock(&cache->mutex);
+
+    while (1) {
+        while (cache->size == sentTotal && !cache->completed && !cache->canceled) {
+            pthread_cond_wait(&cache->updated, &cache->mutex);
+        }
+
+        if (cache->canceled) {
+            ret = -1;
+            break;
+        }
+
+        lenToSend = cache->size - sentTotal;
+        err = sendData(sock, cache->buf + sentTotal, lenToSend);
+        if (err) {
+            ret = -1;
+            break;
+        }
+        sentTotal = cache->size;
+
+        if (cache->completed) {
+            ret = 0;
+            break;
+        }
+    }
+
+    pthread_mutex_unlock(&cache->mutex);
+    return ret;
 }
 
 
@@ -275,7 +306,7 @@ static ssize_t readAndParseRequest(int sock, char *buf, size_t maxLen, reqParse_
     return buflen;
 }
 
-static ssize_t handleResponse(int sockToServ, int sockToClient, cacheEntry_t **cacheEntry, int *status) {
+static ssize_t handleResponse(int sockToServ, int sockToClient, char *req, cacheStorage_t *cacheStorage, int *status) {
     char buf[READ_BUF_LEN + 1];
     respParse_t parse;
     cacheEntry_t *newCache = NULL;
@@ -333,7 +364,6 @@ static ssize_t handleResponse(int sockToServ, int sockToClient, cacheEntry_t **c
         newCache = cacheEntryCreate();
         if (!newCache) {
             loggerError("Failed to create new cache entry");
-            return -1;
         }
     }
 
@@ -341,41 +371,51 @@ static ssize_t handleResponse(int sockToServ, int sockToClient, cacheEntry_t **c
     err = cacheEntryAppend(newCache, buf, recvdTotal);
     if (err) {
         loggerError("Failed to append data to cache entry");
-        goto error;
+        cacheEntryDestroy(newCache);
+        newCache = NULL;
+    }
+
+    /* Сразу добавляем запись в хранилище */
+    err = cacheStoragePut(cacheStorage, req, newCache);
+    if (err) {
+        loggerError("Failed to add cache entry to storage");
+        cacheEntryDestroy(newCache);
+        newCache = NULL;
     }
 
     /* Получаем оставшиеся данные от сервера, пересылаем клиенту и сохраняем в кэш */
     ssize_t remaining = headerLen + contentLen - recvdTotal;
     while (remaining > 0) {
         recvd = read(sockToServ, buf, READ_BUF_LEN);
-        if (recvd == -1) {
-            loggerError("Receive error: %s", strerror(errno));
+        if (recvd <= 0) {
+            if (recvd == -1) loggerError("Receive error: %s", strerror(errno));
+            if (recvd == 0) loggerError("Receive error: server disconnected");
+            cacheEntrySetCanceled(newCache);
+            cacheStorageRemove(cacheStorage, req);
             return -1;
         }
-        if (recvd == 0) {
-            loggerError("Receive error: server disconnected");
-            return -1;
-        }
+
         remaining -= recvd;
         recvdTotal += recvd;
 
         err = sendData(sockToClient, buf, recvd);
         if (err) {
             loggerError("Failed to send data back to client");
-            goto error;
+            cacheEntrySetCanceled(newCache);
+            cacheStorageRemove(cacheStorage, req);
+            return -1;
         }
 
         err = cacheEntryAppend(newCache, buf, recvd);
         if (err) {
             loggerError("Failed to append data to cache entry");
-            goto error;
+            cacheEntrySetCanceled(newCache);
+            cacheStorageRemove(cacheStorage, req);
+            newCache = NULL;
         }
     }
 
-    *cacheEntry = newCache;
+    cacheEntrySetCompleted(newCache);
+    loggerDebug("Cached response to %s", req);
     return recvdTotal;
-
-    error:
-        cacheEntryDestroy(newCache);
-        return -1;
 }

@@ -1,4 +1,4 @@
-TARGET_1 = cache-proxy
+TARGET_1 = cache-proxy.out
 
 SRCS_1 = 	main.c logger/logger.c cache/cache-storage.c								\
 			cache/cache-entry.c proxy/proxy.c proxy/client-handler.c					\

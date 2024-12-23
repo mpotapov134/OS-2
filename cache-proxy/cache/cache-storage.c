@@ -60,7 +60,7 @@ void cacheStorageDestroy(cacheStorage_t *storage) {
 }
 
 int cacheStoragePut(cacheStorage_t *storage, char *req, cacheEntry_t *resp) {
-    if (!storage || !req || !resp) return -1;
+    if (!storage || !req || !resp) return 0;
 
     pthread_mutex_lock(&storage->mutex);
 
@@ -133,7 +133,7 @@ cacheEntry_t *cacheStorageGet(cacheStorage_t *storage, char *req) {
 }
 
 int cacheStorageRemove(cacheStorage_t *storage, char *req) {
-    if (!storage || !req) return -1;
+    if (!storage || !req) return 0;
 
     pthread_mutex_lock(&storage->mutex);
 
