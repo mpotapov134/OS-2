@@ -54,42 +54,32 @@ void *monitor(void *arg) {
 
 void *searchIncreasing(void *arg) {
     Storage *storage = (Storage*) arg;
-    Node *current = storage->first;
-    int countIncCur = 0;
 
     while (1) {
-        if (current == NULL) {
-            current = storage->first;
-        }
+        Node *current = storage->first;
+        Node *tmp;
+        int countIncCur = 0;
 
         lockRd(&current->lock);
+        while (1) {
+            tmp = current;
+            if (current->next == NULL) {
+                break;
+            }
 
-        /* reached end of list */
-        if (current->next == NULL) {
-            iterIncrease++;
-            countInc = countIncCur;
-            countIncCur = 0;
-            unlock(&current->lock);
+            lockRd(&current->next->lock);
 
-            #ifdef SLEEP
-            usleep(500);
-            #endif
+            if (strlen(current->value) < strlen(current->next->value)) {
+                countIncCur++;
+            }
 
-            current = storage->first;
-            continue;
+            current = current->next;
+            unlock(&tmp->lock);
         }
 
-        /* have not reached end of list yet */
-        lockRd(&current->next->lock);
-
-        if (strlen(current->value) < strlen(current->next->value)) {
-            countIncCur++;
-        }
-
-        unlock(&current->next->lock);
         unlock(&current->lock);
-
-        current = current->next;
+        iterIncrease++;
+        countInc = countIncCur;
     }
 
     return NULL;
@@ -97,42 +87,32 @@ void *searchIncreasing(void *arg) {
 
 void *searchDecreasing(void *arg) {
     Storage *storage = (Storage*) arg;
-    Node *current = storage->first;
-    int countDecCur = 0;
 
     while (1) {
-        if (current == NULL) {
-            current = storage->first;
-        }
+        Node *current = storage->first;
+        Node *tmp;
+        int countDecCur = 0;
 
         lockRd(&current->lock);
+        while (1) {
+            tmp = current;
+            if (current->next == NULL) {
+                break;
+            }
 
-        /* reached end of list */
-        if (current->next == NULL) {
-            iterDecrease++;
-            countDec = countDecCur;
-            countDecCur = 0;
-            unlock(&current->lock);
+            lockRd(&current->next->lock);
 
-            #ifdef SLEEP
-            usleep(500);
-            #endif
+            if (strlen(current->value) > strlen(current->next->value)) {
+                countDecCur++;
+            }
 
-            current = storage->first;
-            continue;
+            current = current->next;
+            unlock(&tmp->lock);
         }
 
-        /* have not reached end of list yet */
-        lockRd(&current->next->lock);
-
-        if (strlen(current->value) > strlen(current->next->value)) {
-            countDecCur++;
-        }
-
-        unlock(&current->next->lock);
         unlock(&current->lock);
-
-        current = current->next;
+        iterDecrease++;
+        countDec = countDecCur;
     }
 
     return NULL;
@@ -140,42 +120,32 @@ void *searchDecreasing(void *arg) {
 
 void *searchEqual(void *arg) {
     Storage *storage = (Storage*) arg;
-    Node *current = storage->first;
-    int countEqCur = 0;
 
     while (1) {
-        if (current == NULL) {
-            current = storage->first;
-        }
+        Node *current = storage->first;
+        Node *tmp;
+        int countEqCur = 0;
 
         lockRd(&current->lock);
+        while (1) {
+            tmp = current;
+            if (current->next == NULL) {
+                break;
+            }
 
-        /* reached end of list */
-        if (current->next == NULL) {
-            iterEqual++;
-            countEq = countEqCur;
-            countEqCur = 0;
-            unlock(&current->lock);
+            lockRd(&current->next->lock);
 
-            #ifdef SLEEP
-            usleep(500);
-            #endif
+            if (strlen(current->value) == strlen(current->next->value)) {
+                countEqCur++;
+            }
 
-            current = storage->first;
-            continue;
+            current = current->next;
+            unlock(&tmp->lock);
         }
 
-        /* have not reached end of list yet */
-        lockRd(&current->next->lock);
-
-        if (strlen(current->value) == strlen(current->next->value)) {
-            countEqCur++;
-        }
-
-        unlock(&current->next->lock);
         unlock(&current->lock);
-
-        current = current->next;
+        iterEqual++;
+        countEq = countEqCur;
     }
 
     return NULL;
@@ -241,11 +211,10 @@ void *swap(void *arg) {
             pthread_mutex_unlock(&swapCountLock);
         }
 
+        current = current->next;
         unlock(&n2->lock);
         unlock(&n1->lock);
         unlock(&n0->lock);
-
-        current = current->next;
     }
 
     return NULL;
