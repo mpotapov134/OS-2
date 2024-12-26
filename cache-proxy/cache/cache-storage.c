@@ -75,6 +75,7 @@ int cacheStoragePut(cacheStorage_t *storage, char *req, cacheEntry_t *resp) {
                 cacheEntryDereference(current->response);   // удаляем ссылку на старый ответ
                 current->response = resp;                   // заменяем на новый ответ
                 cacheEntryReference(resp);                  // добавлена ссылка на новый ответ
+                time(&current->putTime);
                 loggerDebug("cacheStoragePut: modified node, key '%s'", req);
             }
 
@@ -103,6 +104,8 @@ int cacheStoragePut(cacheStorage_t *storage, char *req, cacheEntry_t *resp) {
 
     newNode->next = storage->map[index];    // добавлем в начало списка
     storage->map[index] = newNode;
+
+    time(&newNode->putTime);
 
     loggerDebug("cacheStoragePut: created new node, key '%s'", req);
     pthread_mutex_unlock(&storage->mutex);
@@ -164,4 +167,41 @@ int cacheStorageRemove(cacheStorage_t *storage, char *req) {
 
     pthread_mutex_unlock(&storage->mutex);
     return -1;
+}
+
+int cacheStorageClean(cacheStorage_t *storage) {
+    if (!storage) return 0;
+    time_t curTime = time(NULL);
+    int removedEntries = 0;
+
+    pthread_mutex_lock(&storage->mutex);
+
+    for (int i = 0; i < MAP_SIZE; i++) {
+        node_t *current = storage->map[i];
+        node_t* previous = NULL;
+
+        while (current) {
+            node_t *temp = current;
+            current = current->next;
+
+            if (curTime - temp->putTime >= EXPIRY_TIME) {
+                if (previous) {
+                    previous->next = temp->next;
+                } else {
+                    storage->map[i] = temp->next;
+                }
+
+                /* удаляем ссылку и очищаем ресурсы ноды */
+                cacheEntryDereference(temp->response);
+                free(temp->request);
+                free(temp);
+                removedEntries++;
+            }
+
+            previous = temp;
+        }
+    }
+
+    pthread_mutex_unlock(&storage->mutex);
+    return removedEntries;
 }

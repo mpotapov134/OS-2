@@ -11,7 +11,7 @@ INCL_1 =	logger/logger.h cache/cache-storage.h cache/cache-entry.h					\
 CC=gcc
 RM=rm
 CFLAGS= -g -Wall
-LIBS=-lpthread
+LIBS=-lpthread -lrt
 INCLUDE_DIR="."
 
 all: ${TARGET_1}

@@ -416,6 +416,8 @@ static ssize_t handleResponse(int sockToServ, int sockToClient, char *req, cache
     }
 
     cacheEntrySetCompleted(newCache);
-    loggerDebug("Cached response to %s", req);
+    if (newCache) {
+        loggerDebug("Cached response to %s", req);
+    }
     return recvdTotal;
 }

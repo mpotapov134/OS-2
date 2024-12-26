@@ -39,6 +39,45 @@ static int createServSocket() {
     return servSocket;
 }
 
+static int createGCTimer(proxy_t *proxy) {
+    struct sigevent event;
+    event.sigev_notify = SIGEV_THREAD;
+    event.sigev_signo = 0;
+    event.sigev_value.sival_ptr = proxy;
+    event.sigev_notify_function = garbageCollectorRoutine;
+    event.sigev_notify_attributes = NULL;
+
+    struct itimerspec tmrSpec;
+    tmrSpec.it_value.tv_sec = EXPIRY_TIME;
+    tmrSpec.it_value.tv_nsec = 0;
+    tmrSpec.it_interval.tv_sec = EXPIRY_TIME;
+    tmrSpec.it_interval.tv_nsec = 0;
+
+    int err = timer_create(CLOCK_REALTIME, &event, &proxy->gcTimer);
+    if (err) {
+        loggerError("Failed to create timer for garbage collector");
+        return -1;
+    }
+
+    err = timer_settime(proxy->gcTimer, 0, &tmrSpec, NULL);
+    if (err) {
+        loggerError("Failed to arm timer for garbage collector");
+        return -1;
+    }
+
+    return 0;
+}
+
+static void fireGCTimer(proxy_t *proxy) {
+    struct itimerspec tmrSpec;
+    tmrSpec.it_value.tv_sec = 0;
+    tmrSpec.it_value.tv_nsec = 1000;
+    tmrSpec.it_interval.tv_sec = 0;
+    tmrSpec.it_interval.tv_nsec = 0;
+
+    timer_settime(proxy->gcTimer, 0, &tmrSpec, NULL);
+}
+
 proxy_t *proxyCreate(cacheStorage_t *cache, threadPool_t *threadpool) {
     if (!cache) {
         loggerError("proxyCreate: invalid cache");
@@ -57,16 +96,44 @@ proxy_t *proxyCreate(cacheStorage_t *cache, threadPool_t *threadpool) {
         return NULL;
     }
 
+    proxy->running = 1;
     proxy->cache = cache;
     proxy->threadpool = threadpool;
+
+    proxy->gcFinished = 0;
+    pthread_cond_init(&proxy->gcFinishedCond, NULL);
+    pthread_mutex_init(&proxy->mutex, NULL);
+
+    int err = createGCTimer(proxy);
+    if (err) {
+        close(proxy->servSocket);
+        pthread_cond_destroy(&proxy->gcFinishedCond);
+        pthread_mutex_destroy(&proxy->mutex);
+        free(proxy);
+        return NULL;
+    }
 
     return proxy;
 }
 
 void proxyDestroy(proxy_t *proxy) {
     if (!proxy) return;
-    close(proxy->servSocket);
+
+    pthread_mutex_lock(&proxy->mutex);
+
     proxy->running = 0;
+    close(proxy->servSocket);
+
+    fireGCTimer(proxy);
+    while (!proxy->gcFinished) {
+        pthread_cond_wait(&proxy->gcFinishedCond, &proxy->mutex);
+    }
+
+    timer_delete(proxy->gcTimer);
+
+    pthread_mutex_unlock(&proxy->mutex);
+    pthread_mutex_destroy(&proxy->mutex);
+    pthread_cond_destroy(&proxy->gcFinishedCond);
     free(proxy);
 }
 
@@ -76,7 +143,6 @@ int proxyStart(proxy_t *proxy) {
 
     loggerInfo("Proxy started");
 
-    proxy->running = 1;
     while (proxy->running) {
         int clientSocket = accept(proxy->servSocket, NULL, NULL);
         if (clientSocket < 0) {
@@ -100,4 +166,23 @@ int proxyStart(proxy_t *proxy) {
     }
 
     return 0;
+}
+
+void garbageCollectorRoutine(union sigval arg) {
+    proxy_t *proxy = (proxy_t*) arg.sival_ptr;
+
+    pthread_mutex_lock(&proxy->mutex);
+
+    if (!proxy->running) {
+        proxy->gcFinished = 1;
+        pthread_cond_signal(&proxy->gcFinishedCond);
+        pthread_mutex_unlock(&proxy->mutex);
+        loggerDebug("Garbage collector finished");
+        return;
+    }
+
+    int removedEntries = cacheStorageClean(proxy->cache);
+    pthread_mutex_unlock(&proxy->mutex);
+
+    loggerInfo("Garbage collector: removed %i cache entries", removedEntries);
 }
