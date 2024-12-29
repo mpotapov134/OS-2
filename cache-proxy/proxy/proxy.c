@@ -113,6 +113,8 @@ proxy_t *proxyCreate(cacheStorage_t *cache, threadPool_t *threadpool) {
         return NULL;
     }
 
+    clientHandlerInit();
+
     return proxy;
 }
 
@@ -135,6 +137,8 @@ void proxyDestroy(proxy_t *proxy) {
     pthread_mutex_destroy(&proxy->mutex);
     pthread_cond_destroy(&proxy->gcFinishedCond);
     free(proxy);
+
+    clientHandlerFinalize();
 }
 
 int proxyStart(proxy_t *proxy) {

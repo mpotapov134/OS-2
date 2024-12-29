@@ -9,6 +9,7 @@
 cacheEntry_t *cacheEntryCreate() {
     cacheEntry_t *entry = calloc(1, sizeof(*entry));
     if (!entry) return NULL;
+    entry->refCount = 1;
     pthread_mutex_init(&entry->mutex, NULL);
     pthread_cond_init(&entry->updated, NULL);
     pthread_spin_init(&entry->refCountLock, 0);
@@ -50,7 +51,7 @@ int cacheEntryAppend(cacheEntry_t *entry, char *newData, size_t size) {
     memcpy(entry->buf + entry->size, newData, size);
     entry->size += size;
 
-    pthread_cond_signal(&entry->updated);
+    pthread_cond_broadcast(&entry->updated);
     pthread_mutex_unlock(&entry->mutex);
 
     return 0;
