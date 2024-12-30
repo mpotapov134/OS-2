@@ -35,9 +35,6 @@ typedef struct {
     cacheStorage_t *cache;
 } clientHandlerArgs_t;
 
-void clientHandlerInit();
-void clientHandlerFinalize();
-
 void handleClient(void *args);
 
 #endif /* CACHE_PROXY_CLIENT_HANDLER */

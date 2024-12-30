@@ -29,4 +29,7 @@ cacheEntry_t *cacheStorageGet(cacheStorage_t *storage, char *req);
 int cacheStorageRemove(cacheStorage_t *storage, char *req);
 int cacheStorageClean(cacheStorage_t *storage);
 
+int cacheStoragePutUnsafe(cacheStorage_t *storage, char *req, cacheEntry_t *resp);
+cacheEntry_t *cacheStorageGetUnsafe(cacheStorage_t *storage, char *req);
+
 #endif /* CACHE_PROXY_CACHE_STORAGE */

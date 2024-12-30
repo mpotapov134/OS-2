@@ -14,8 +14,6 @@
 #include "client-handler.h"
 #include "logger/logger.h"
 
-static pthread_mutex_t searchCreateMutex;
-
 static int strEq(const char *s1, const char *s2, size_t len);
 static int setTimeout(int sock, unsigned int ms);
 static void disconnect(int sock);
@@ -29,16 +27,6 @@ static int sendFromCache(int sock, cacheEntry_t *cache);
 
 static ssize_t readAndParseRequest(int sock, char *buf, size_t maxLen, reqParse_t *parseData);
 static ssize_t handleResponse(int sockToServ, int sockToClient, cacheEntry_t *cacheEntry, int *status);
-
-
-
-void clientHandlerInit() {
-    pthread_mutex_init(&searchCreateMutex, NULL);
-}
-
-void clientHandlerFinalize() {
-    pthread_mutex_destroy(&searchCreateMutex);
-}
 
 
 
@@ -77,12 +65,12 @@ void handleClient(void *args) {
         return;
     }
 
-    pthread_mutex_lock(&searchCreateMutex);
+    pthread_mutex_lock(&cacheStorage->mutex);
 
     /* Поиск записи в кэше и отправка */
-    cacheEntry = cacheStorageGet(cacheStorage, path);
+    cacheEntry = cacheStorageGetUnsafe(cacheStorage, path);
     if (cacheEntry) {
-        pthread_mutex_unlock(&searchCreateMutex);
+        pthread_mutex_unlock(&cacheStorage->mutex);
 
         loggerDebug("Found cache entry for resource %s", path);
 
@@ -101,14 +89,14 @@ void handleClient(void *args) {
 
     cacheEntry = cacheEntryCreate();
     if (!cacheEntry) {
-        pthread_mutex_unlock(&searchCreateMutex);
+        pthread_mutex_unlock(&cacheStorage->mutex);
         loggerError("Failed to create cache entry");
         disconnect(sockToClient);
         return;
     }
 
-    err = cacheStoragePut(cacheStorage, path, cacheEntry);
-    pthread_mutex_unlock(&searchCreateMutex);
+    err = cacheStoragePutUnsafe(cacheStorage, path, cacheEntry);
+    pthread_mutex_unlock(&cacheStorage->mutex);
     if (err) {
         loggerError("Failed to add entry for resource %s", path);
         cacheEntryDereference(cacheEntry);
